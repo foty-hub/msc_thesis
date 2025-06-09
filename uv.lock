@@ -30,6 +30,21 @@ wheels = [
 ]
 
 [[package]]
+name = "box2d"
+version = "2.3.10"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6b/19/1306ce0c5a7f95b4f16fd748f5040ccadc590753a4acd0e7f393ef970a47/Box2D-2.3.10-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:0bd976f03bb08ffc86172bbf687afdd6e499a34f7d0ebf9da65f7a9c0ff62ba9", size = 1324189, upload-time = "2024-11-29T18:03:07.169Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/2c/33285e6fe35dc8aa8d44be0905b8a202abba11474d57d1b1dfa81b5779f6/Box2D-2.3.10-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:047d4faae2dc53c408970e494831361fce0460faaa2ed9544824dd3ea5321e7e", size = 1280162, upload-time = "2024-11-29T18:03:11.696Z" },
+    { url = "https://files.pythonhosted.org/packages/aa/50/141a420f97920c4cac12037c7cb9ced2631d7d04e33a59b32bea97a846b6/Box2D-2.3.10-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:ffa4f7955147dd64d33dbb1d360486984d13cda6e566c7c0c5bea348a8b172b4", size = 3689335, upload-time = "2024-11-29T18:03:34.314Z" },
+    { url = "https://files.pythonhosted.org/packages/12/bf/791c594e5fd8a9e930e4672761e2a5d00bf9fbb60cddfe5e2233eafa6e22/Box2D-2.3.10-cp313-cp313-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:f460cb51926ffa9897070f3e7a4a30389da47946c8287ae36bd34b72590b9a99", size = 3373916, upload-time = "2024-11-29T18:03:44.799Z" },
+    { url = "https://files.pythonhosted.org/packages/9f/f8/4ccc3422f985639ee4120d3503d6263b9fa2e382a250c8ede444399b76e1/Box2D-2.3.10-cp313-cp313-musllinux_1_2_i686.whl", hash = "sha256:90a48c81e5dc3667ee376d5f1986b645b0b5140644f39032ad2853ff760dd84a", size = 4340307, upload-time = "2024-11-29T18:04:14.854Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/c8/3ed795c0e920b461eec500798d2247ac3ba38cf20bb6497c28a9891ee9a2/Box2D-2.3.10-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:a09ded6f5a4b55f0188af2ad63a6f7d60adc7154671e9f32cef4a0cabf5ed542", size = 4419706, upload-time = "2024-11-29T18:04:28.446Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/2e/8b95f2779467c9af0ee62105f105a96e1b5a1380dbf5c546a09af5c51d4e/Box2D-2.3.10-cp313-cp313-win32.whl", hash = "sha256:6d4b0bd0e118e0449eadbadc6cf4617b1dbf72b411fbdccab4921108b3c2b768", size = 1193206, upload-time = "2024-11-29T18:05:01.167Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/90/230643c42763a1f5eb0554fbb6729befe6730f6dd9a9e4ec61cd470b94be/Box2D-2.3.10-cp313-cp313-win_amd64.whl", hash = "sha256:49f9d3d0d5956d360e25cd9733a29a3f0018297a3b554a401f19ed2c9499a507", size = 1312703, upload-time = "2024-11-29T18:05:45.749Z" },
+]
+
+[[package]]
 name = "cffi"
 version = "1.17.1"
 source = { registry = "https://pypi.org/simple" }
@@ -593,6 +608,7 @@ name = "msc-thesis"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "box2d" },
     { name = "flax" },
     { name = "gymnasium" },
     { name = "ipykernel" },
@@ -604,6 +620,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "box2d", specifier = ">=2.3.10" },
     { name = "flax", specifier = ">=0.10.6" },
     { name = "gymnasium", specifier = ">=1.1.1" },
     { name = "ipykernel", specifier = ">=6.29.5" },
