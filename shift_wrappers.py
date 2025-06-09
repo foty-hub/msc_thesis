@@ -29,7 +29,9 @@ class ObservationNoiseWrapper(gym.ObservationWrapper):
 class FlatlineWrapper(gym.ObservationWrapper):
     """Replaces one element of the observation vector with a constant value."""
 
-    def __init__(self, env: gym.Env, index: int, value: float = 0.0, activate_episode: int = 0):
+    def __init__(
+        self, env: gym.Env, index: int, value: float = 0.0, activate_episode: int = 0
+    ):
         super().__init__(env)
         self.index = index
         self.value = value
