@@ -13,4 +13,5 @@ dependencies = [
     "matplotlib>=3.10.3",
     "optax>=0.2.4",
     "torch>=2.7.0",
+    "torchvision>=0.22.0",
 ]
