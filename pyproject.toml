@@ -6,11 +6,15 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "box2d>=2.3.10",
+    "distrax>=0.1.5",
+    "einops>=0.8.1",
     "flax>=0.10.6",
     "gymnasium>=1.1.1",
     "ipykernel>=6.29.5",
     "jax>=0.6.1",
     "matplotlib>=3.10.3",
     "optax>=0.2.4",
+    "seaborn>=0.13.2",
     "torch>=2.7.0",
+    "torchvision>=0.22.0",
 ]

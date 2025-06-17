@@ -9,3 +9,7 @@ wheels/
 # Virtual environments
 .venv
 .DS_Store
+data/
+
+# ignore testing model path
+notebooks/checkpoints
