@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "box2d>=2.3.10",
+    "distrax>=0.1.5",
     "einops>=0.8.1",
     "flax>=0.10.6",
     "gymnasium>=1.1.1",
