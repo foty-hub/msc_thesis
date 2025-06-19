@@ -1,6 +1,7 @@
 # %%
 import numpy as np
 import matplotlib.pyplot as plt
+from typing import Iterable
 from crl.graph_utils import despine
 
 # --- Constants for Readability ---
@@ -252,6 +253,8 @@ def run_smart_experiment(env_delta: float, window: int = 100) -> np.ndarray:
     return returns_smoothed
 
 
+# %%
+# EXPERIMENT - Comparing loss in reward due to distributional shift
 window = 100
 n_runs = 50
 for env_delta in reversed([0.1, 0.3, 0.5, 0.7, 0.9]):
@@ -286,11 +289,46 @@ plt.ylabel(r"Reward")
 plt.xlabel(r"Episode #")
 despine(plt.gca())
 plt.grid(visible=True, which="major", axis="y", alpha=0.4)
+CHARTS_DIR = "../results/figures/basic_mdp"
 plt.savefig(
-    f"../results/figures/basic_mdp/agent_belief_nruns_{n_runs}_smoothing_{window}_risk_reward_{int(np.abs(risky_reward))}.pdf",
+    f"{CHARTS_DIR}/agent_belief_nruns_{n_runs}_smoothing_{window}_risk_reward_{int(np.abs(risky_reward))}.pdf",
     bbox_inches="tight",
 )
 plt.show()
 print(f"note smoothing window of {window}")
 
+# %%
+# EXPERIMENT - observing agent reward under active distribution shift
+NUM_EPISODES = 2000
+schedule1 = [0.9] * 1000 + [0.1] * 1000
+schedule2 = np.linspace(0.9, 0.1, NUM_EPISODES).tolist()
+schedule3 = (0.4 * np.cos(np.linspace(0, np.pi, NUM_EPISODES)) + 0.5).tolist()
+
+n_runs = 50  # number of repetitions for averaging
+
+fig, axes = plt.subplots(2, 3, sharex="col", sharey="row", figsize=(12, 6))
+results_matrix = np.zeros((NUM_EPISODES, n_runs, 3))
+for ix, schedule in enumerate([schedule1, schedule2, schedule3]):
+    temp = np.zeros((NUM_EPISODES, n_runs))
+    for k in range(n_runs):
+        env = MDPEnv(delta=schedule)
+        agent = SmartAgent(model_delta=0.9)
+        temp[:, k] = run_experiment(agent, env, NUM_EPISODES)
+    mean_results = temp.mean(axis=1)
+    std_results = temp.std(axis=1)
+    axes[0, ix].plot(mean_results, label=f"δ={ix}")
+    axes[0, ix].fill_between(
+        range(NUM_EPISODES),
+        mean_results - std_results,
+        mean_results + std_results,
+        alpha=0.2,
+        linewidth=0,
+    )
+    axes[1, ix].plot(schedule)
+    despine(axes[0, ix])
+    despine(axes[1, ix])
+axes[0, 0].set_ylabel("Reward")
+axes[1, 0].set_ylabel(r"$\delta$", rotation=0)
+fig.suptitle("Reward trajectories without conformal adaptation")
+fig.savefig(f"{CHARTS_DIR}/distribution_shift_no_adaptation.pdf")
 # %%
