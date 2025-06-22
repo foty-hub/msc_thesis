@@ -318,7 +318,6 @@ def run_basic_experiment(env_delta: float, window: int = 100) -> np.ndarray:
     return returns_smoothed
 
 
-# %%
 # EXPERIMENT - Comparing loss in reward due to distributional shift
 window = 100
 n_runs = 50
@@ -363,6 +362,32 @@ plt.show()
 print(f"note smoothing window of {window}")
 
 # %%
+# Analytic plot of value of the starting state
+n_steps = 200
+x_vals = np.linspace(0.01, 1, n_steps)
+y_risky_vals = -1 / x_vals
+y_safe_vals = np.zeros(n_steps) - 2  # 2 everywhere
+
+plt.plot(x_vals, y_safe_vals, label=r"$\pi_{safe}$")
+plt.plot(x_vals, y_risky_vals, label=r"$\pi_{risky}$")
+plt.ylim(-5, 0)
+ax = plt.gca()
+
+despine(ax)
+
+# Axis labels, title, and legend
+ax.set_xlabel(r"Success probability $\delta$")
+ax.set_ylabel("Value of start state")
+ax.set_title(
+    r"""An agent which mistakenly believes $\delta=0.9$ 
+    can suffer arbitrarily low reward"""
+)
+ax.legend()
+
+plt.show()
+plt.savefig(f"{CHARTS_DIR}/risky_performance.pdf")
+
+# %%
 # EXPERIMENT - observing agent reward under distribution shift
 NUM_EPISODES = 2000
 USE_CONFORMAL_PREDICTION = True
@@ -405,9 +430,13 @@ def run_shift_experiment(
         axes[1, ix].plot(schedule)
         despine(axes[0, ix])
         despine(axes[1, ix])
+        axes[0, ix].set_ylim(-20, 0)
     axes[0, 0].set_ylabel("Return")
     axes[1, 0].set_ylabel(r"$\delta$", rotation=0)
     axes[1, 0].set_xlabel("Episode #")
+    # Set specific y‑axis ticks for the δ plots
+    for ax in axes[1]:
+        ax.set_yticks([0.1, 0.3, 0.5, 0.7, 0.9])
     fig.suptitle(plot_title)
     fig.savefig(
         f"{CHARTS_DIR}/distribution_shift_usecp_{str(use_conformal_prediction).lower()}_validactions_{len(cp_valid_actions)}.pdf"
