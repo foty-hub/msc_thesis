@@ -383,9 +383,8 @@ ax.set_title(
     can suffer arbitrarily low reward"""
 )
 ax.legend()
-
-plt.show()
 plt.savefig(f"{CHARTS_DIR}/risky_performance.pdf")
+plt.show()
 
 # %%
 # EXPERIMENT - observing agent reward under distribution shift
