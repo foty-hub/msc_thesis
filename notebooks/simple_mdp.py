@@ -1,25 +1,34 @@
 # %%
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Iterable
 from crl.graph_utils import despine
+from collections import deque
+
+# Typing to make function signatures more legible
+type State = int
+type Action = int
+type Reward = float
+type Done = bool
+type Observation = tuple[State, Reward, Action]
 
 # --- Constants for Readability ---
-STATE_MAP: dict[str, int] = {"start": 0, "middle": 1, "goal": 2}
-ACTION_MAP: dict[str, int] = {"a_long": 0, "a_short": 1}
+STATE_MAP: dict[str, State] = {"start": 0, "middle": 1, "goal": 2}
+ACTION_MAP: dict[str, Action] = {"a_long": 0, "a_short": 1}
 # Reverse mapping for inspection
-IDX_TO_STATE: dict[int, str] = {v: k for k, v in STATE_MAP.items()}
+IDX_TO_STATE: dict[State, str] = {v: k for k, v in STATE_MAP.items()}
 
 
 class MDPEnv:
     """
-    Implements the MDP described in the image.
-
     The environment's transition probability `delta` can be a fixed scalar or a
     schedule of values that change on each new episode.
     """
 
-    def __init__(self, delta: float | list[float], a_short_return_reward: float = -1.0):
+    def __init__(
+        self,
+        delta: float | list[float],
+        a_short_return_reward: Reward = -1.0,
+    ):
         """
         Initializes the environment.
 
@@ -39,7 +48,7 @@ class MDPEnv:
         self.episode_count = 0
         self.state = STATE_MAP["start"]
 
-    def reset(self) -> int:
+    def reset(self) -> State:
         """
         Resets the environment to the start state and updates delta if on a schedule.
 
@@ -54,7 +63,7 @@ class MDPEnv:
         self.episode_count += 1
         return self.state
 
-    def step(self, action: int) -> tuple[int, float, bool]:
+    def step(self, action: Action) -> tuple[State, Reward, Done]:
         """
         Executes one time step in the environment.
 
@@ -85,8 +94,6 @@ class MDPEnv:
                 self.state = STATE_MAP["goal"]
                 return self.state, -1.0, True  # Reached goal
 
-        # If in 'goal' state, episode is already done.
-        # This part should ideally not be reached if used correctly.
         raise ValueError(f"Step called from a terminal state or with invalid action.")
 
 
@@ -108,77 +115,138 @@ class SimpleAgent:
         """No internal state to reset."""
         pass
 
+    def __repr__(self) -> str:
+        """Return a concise representation for interactive inspection."""
+        return f"{self.__class__.__name__}(action={self.action})"
 
-class SmartAgent:
-    """
-    Learns a state-value function V(s) using first-visit Monte Carlo and
-    selects actions by querying an internal world model.
-    """
 
+class ConformalAgent:
     def __init__(
         self,
-        model_delta: float,
         learning_rate: float = 0.1,
         gamma: float = 1.0,
-        a_short_return_reward: float = -1.0,
-    ):
-        """
-        Args:
-            model_delta: The agent's internal, fixed belief about the 'a_short'
-                         success probability.
-            learning_rate: The alpha parameter for the V-function update.
-            gamma: The discount factor.
-        """
-        self.model_delta = model_delta
-        self.alpha = learning_rate
+        use_conformal_prediction: bool = False,
+        calibration_set_size: int = 400,
+        alpha: float = 0.9,
+        delta_belief: float = 0.9,
+        cp_valid_actions: None | list[Action] = None,
+    ) -> None:
+        # state value function: S->V
+        self.V = np.zeros(len(STATE_MAP))
         self.gamma = gamma
-        self.a_short_return_reward = a_short_return_reward
-        self.V = np.zeros(len(STATE_MAP))  # V[start], V[middle], V[goal]
-        self.trajectory = []
+        self.learning_rate = learning_rate
+        self.episode_trajectory = []
+        self.calibration_scores = deque(maxlen=calibration_set_size)
+        self.do_conformal_prediction = use_conformal_prediction
+        self.alpha = alpha
+        self._init_world_model(delta_belief)
+        self.calibration_set_is_full = False
+        self.cp_valid_actions = cp_valid_actions or [0, 1]
 
-    def reset(self):
-        """Clears the trajectory for the new episode."""
-        self.trajectory = []
+    def select_action(self, state: State) -> Action:
+        """"""
+        # first, predict the next state for each valid action
+        next_action = -1
+        next_value = -np.inf
 
-    def select_action(self, state: int) -> int:
-        """
-        Selects an action based on a 1-step lookahead using the internal world model.
-        """
         if state == STATE_MAP["middle"]:
-            return ACTION_MAP["a_long"]
+            return ACTION_MAP["a_long"]  # only valid action
 
-        if state == STATE_MAP["start"]:
-            # Value of taking 'a_long'
-            # Expected reward is -1, next state is 'middle'
-            q_long = -1.0 + self.gamma * self.V[STATE_MAP["middle"]]
+        for action in ACTION_MAP.values():
+            preds = self.world_model[state, action]
+            # perform conformal prediction to get an array of possible next states
+            if self.do_conformal_prediction and self.calibration_set_is_full:
+                s_pred = self._conformalise(preds)
+            else:
+                s_pred = [preds.argmax()]
 
-            # Value of taking 'a_short' according to the agent's model
-            val_if_success = -1.0 + self.gamma * self.V[STATE_MAP["goal"]]
-            val_if_fail = (
-                self.a_short_return_reward + self.gamma * self.V[STATE_MAP["start"]]
-            )
-            q_short = (
-                self.model_delta * val_if_success + (1 - self.model_delta) * val_if_fail
-            )
+            # for each possible next state, get the value of it
+            worst_case_value = np.min([self.V[s_next] for s_next in s_pred])
+            if worst_case_value > next_value:
+                next_value = worst_case_value
+                next_action = action
 
-            return ACTION_MAP["a_long"] if q_long >= q_short else ACTION_MAP["a_short"]
+        return next_action
 
-        raise Exception("No action selected")
+    def _conformalise(self, scores: np.ndarray) -> list[State]:
+        """Output a conformal prediction set, given the world model's scores"""
+        # takes world model predictions and returns the conformal prediction set
+        prediction_sets = scores >= (1 - self.qhat)
+        prediction_sets = np.flatnonzero(prediction_sets).tolist()
+        if not prediction_sets:
+            return [scores.argmax()]  # type: ignore
 
-    def update_at_episode_end(self, trajectory: list[tuple]):
-        """
-        Updates the value function using first-visit Monte Carlo.
-        """
+        return prediction_sets
+
+    def update_at_episode_end(
+        self, trajectory: list[tuple[State, Action, Reward]]
+    ) -> None:
+        """Run at the end of an episode to update the value function using the
+        Monte Carlo return"""
+        self._update_value_function(trajectory)
+
+        # update parameters for the conformal predictor
+        if self.do_conformal_prediction and self.calibration_set_is_full:
+            self._update_conformal_predictor()
+
+        # reset the episode trajectory
+        self.episode_trajectory = []
+
+    def _update_value_function(self, trajectory):
         G = 0  # Cumulative discounted return
-        visited_states = set()
 
-        # Iterate backwards through the episode
-        for state, _, reward in reversed(trajectory):
+        # Iterate backwards through the episode to update the value function and fill
+        # in the calibration set
+        next_state = None
+        for state, action, reward in reversed(trajectory):
             G = reward + self.gamma * G
-            if state not in visited_states:
-                # First-visit MC update
-                self.V[state] += self.alpha * (G - self.V[state])
-                visited_states.add(state)
+            self.V[state] += self.learning_rate * (G - self.V[state])
+            # p sure this violates exchangeability... hmmm.....
+            if (next_state is not None) and (action in self.cp_valid_actions):
+                # note 1-prob here - a low probability means high nonconformity score
+                score = 1 - self.world_model[state, action, next_state]
+                self.calibration_scores.append(score)
+
+            next_state = state
+
+        # check if the calibration set is full - to start conformalising
+        self.calibration_set_is_full = (
+            len(self.calibration_scores) == self.calibration_scores.maxlen
+        )
+
+    def _update_conformal_predictor(self):
+        n = len(self.calibration_scores)
+        q_level = np.ceil((n + 1) * (1 - self.alpha)) / n
+        self.qhat = np.quantile(self.calibration_scores, q_level, method="higher")
+
+    def _init_world_model(self, delta: float) -> None:
+        # world model: SxA->S'
+        self.world_model = np.zeros((len(STATE_MAP), len(ACTION_MAP), len(STATE_MAP)))
+        # fmt: off
+        self.world_model[STATE_MAP['start'], ACTION_MAP["a_short"]] = 1-delta, 0, delta
+        self.world_model[STATE_MAP['start'], ACTION_MAP["a_long"]]  =       0, 1, 0
+        self.world_model[STATE_MAP['middle'], ACTION_MAP["a_long"]] =       0, 0, 1
+        # fmt: on
+
+    def reset(self, reset_conformal_predictor: bool = False) -> None:
+        self.trajectory = []
+
+        if reset_conformal_predictor:
+            self.calibration_scores.clear()
+            self.calibration_set_is_full = False
+
+    def __repr__(self) -> str:
+        """Return a concise representation for interactive inspection."""
+        return (
+            f"{self.__class__.__name__}("
+            f"learning_rate={self.learning_rate}, "
+            f"gamma={self.gamma}, "
+            f"do_conformal_prediction={self.do_conformal_prediction}, "
+            f"calibration_set_size={self.calibration_scores.maxlen}, "
+            f"alpha={self.alpha}, "
+            f"calibration_set_is_full={self.calibration_set_is_full}"
+            ")"
+        )
 
 
 # --- Experiment Runner ---
@@ -236,14 +304,11 @@ env = MDPEnv(delta=env_delta, a_short_return_reward=risky_reward)
 dumb_returns = run_experiment(dumb_agent, env, NUM_EPISODES)
 
 # now simulate a few different environments for the smart agent
-smart_agent = SmartAgent(
-    model_delta=model_delta,
-    a_short_return_reward=risky_reward,
-)
+smart_agent = ConformalAgent(delta_belief=model_delta, use_conformal_prediction=False)
 
 
 # reverse so colours are in descending order in the legend
-def run_smart_experiment(env_delta: float, window: int = 100) -> np.ndarray:
+def run_basic_experiment(env_delta: float, window: int = 100) -> np.ndarray:
     env = MDPEnv(delta=env_delta, a_short_return_reward=risky_reward)
     # --- Rolling average smoothing ---
     returns = run_experiment(smart_agent, env, NUM_EPISODES)
@@ -260,7 +325,7 @@ n_runs = 50
 for env_delta in reversed([0.1, 0.3, 0.5, 0.7, 0.9]):
     results = np.zeros((NUM_EPISODES - window + 1, n_runs))
     for k in range(n_runs):
-        results[:, k] = run_smart_experiment(env_delta, window)
+        results[:, k] = run_basic_experiment(env_delta, window)
 
     # average over the runs
     mean = results.mean(1)
@@ -298,37 +363,76 @@ plt.show()
 print(f"note smoothing window of {window}")
 
 # %%
-# EXPERIMENT - observing agent reward under active distribution shift
+# EXPERIMENT - observing agent reward under distribution shift
 NUM_EPISODES = 2000
-schedule1 = [0.9] * 1000 + [0.1] * 1000
-schedule2 = np.linspace(0.9, 0.1, NUM_EPISODES).tolist()
-schedule3 = (0.4 * np.cos(np.linspace(0, np.pi, NUM_EPISODES)) + 0.5).tolist()
+USE_CONFORMAL_PREDICTION = True
+CP_VALID_ACTIONS = [1]  # which actions to allow into the conformal prediction set
+plot_title = "Reward trajectories without conformal adaptation"
 
-n_runs = 50  # number of repetitions for averaging
 
-fig, axes = plt.subplots(2, 3, sharex="col", sharey="row", figsize=(12, 6))
-results_matrix = np.zeros((NUM_EPISODES, n_runs, 3))
-for ix, schedule in enumerate([schedule1, schedule2, schedule3]):
-    temp = np.zeros((NUM_EPISODES, n_runs))
-    for k in range(n_runs):
-        env = MDPEnv(delta=schedule)
-        agent = SmartAgent(model_delta=0.9)
-        temp[:, k] = run_experiment(agent, env, NUM_EPISODES)
-    mean_results = temp.mean(axis=1)
-    std_results = temp.std(axis=1)
-    axes[0, ix].plot(mean_results, label=f"δ={ix}")
-    axes[0, ix].fill_between(
-        range(NUM_EPISODES),
-        mean_results - std_results,
-        mean_results + std_results,
-        alpha=0.2,
-        linewidth=0,
+def run_shift_experiment(
+    use_conformal_prediction: bool,
+    cp_valid_actions: list[int],
+    plot_title: str,
+    num_episodes: int = 2000,
+    n_runs=50,
+):
+    schedule1 = [0.9] * 1000 + [0.1] * 1000
+    schedule2 = np.linspace(0.9, 0.1, num_episodes).tolist()
+    schedule3 = (0.4 * np.cos(np.linspace(0, np.pi, num_episodes)) + 0.5).tolist()
+
+    fig, axes = plt.subplots(2, 3, sharex="col", sharey="row", figsize=(12, 6))
+    for ix, schedule in enumerate([schedule1, schedule2, schedule3]):
+        temp = np.zeros((num_episodes, n_runs))
+        for k in range(n_runs):
+            env = MDPEnv(delta=schedule)
+            agent = ConformalAgent(
+                delta_belief=0.9,
+                use_conformal_prediction=use_conformal_prediction,
+                cp_valid_actions=cp_valid_actions,
+            )
+            temp[:, k] = run_experiment(agent, env, num_episodes)
+        mean_results = temp.mean(axis=1)
+        std_results = temp.std(axis=1)
+        axes[0, ix].plot(mean_results, label=f"δ={ix}")
+        axes[0, ix].fill_between(
+            range(num_episodes),
+            mean_results - std_results,
+            mean_results + std_results,
+            alpha=0.2,
+            linewidth=0,
+        )
+        axes[1, ix].plot(schedule)
+        despine(axes[0, ix])
+        despine(axes[1, ix])
+    axes[0, 0].set_ylabel("Return")
+    axes[1, 0].set_ylabel(r"$\delta$", rotation=0)
+    axes[1, 0].set_xlabel("Episode #")
+    fig.suptitle(plot_title)
+    fig.savefig(
+        f"{CHARTS_DIR}/distribution_shift_usecp_{str(use_conformal_prediction).lower()}_validactions_{len(cp_valid_actions)}.pdf"
     )
-    axes[1, ix].plot(schedule)
-    despine(axes[0, ix])
-    despine(axes[1, ix])
-axes[0, 0].set_ylabel("Reward")
-axes[1, 0].set_ylabel(r"$\delta$", rotation=0)
-fig.suptitle("Reward trajectories without conformal adaptation")
-fig.savefig(f"{CHARTS_DIR}/distribution_shift_no_adaptation.pdf")
+
+
+SHIFT_EXPERIMENTS = [
+    dict(
+        use_conformal_prediction=False,
+        cp_valid_actions=[0, 1],
+        plot_title="Agent performance under distributional shift without test-time adaptation",
+    ),
+    dict(
+        use_conformal_prediction=True,
+        cp_valid_actions=[0, 1],
+        plot_title="ConformalAgent without state-action conditiong",
+    ),
+    dict(
+        use_conformal_prediction=True,
+        cp_valid_actions=[1],
+        plot_title=r"ConformalAgent with state-action conditiong",
+    ),
+]
+
+for exp in SHIFT_EXPERIMENTS:
+    run_shift_experiment(**exp)  # type: ignore
+
 # %%
