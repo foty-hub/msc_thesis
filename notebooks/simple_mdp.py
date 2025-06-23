@@ -144,7 +144,7 @@ class ConformalAgent:
         self.cp_valid_actions = cp_valid_actions or [0, 1]
 
     def select_action(self, state: State) -> Action:
-        """"""
+        """Given the state, returns the next action using conformal prediction"""
         # first, predict the next state for each valid action
         next_action = -1
         next_value = -np.inf
