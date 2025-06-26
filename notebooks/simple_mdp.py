@@ -398,15 +398,18 @@ def run_shift_experiment(
     use_conformal_prediction: bool,
     cp_valid_actions: list[int],
     plot_title: str,
+    calibration_set_size: int = 400,
     num_episodes: int = 2000,
-    n_runs=50,
+    n_runs: int = 50,
+    delta_max: float = 0.9,
+    delta_min: float = 0.1,
 ):
-    schedule1 = [0.9] * 1000 + [0.1] * 1000
-    schedule2 = np.linspace(0.9, 0.1, num_episodes).tolist()
-    schedule3 = (0.4 * np.cos(np.linspace(0, np.pi, num_episodes)) + 0.5).tolist()
+    schedule1 = [delta_max] * 1000 + [delta_min] * 1000
+    schedule2 = np.linspace(delta_max, 0.1, num_episodes).tolist()
+    # schedule3 = (0.4 * np.cos(np.linspace(0, np.pi, num_episodes)) + 0.5).tolist()
 
-    fig, axes = plt.subplots(2, 3, sharex="col", sharey="row", figsize=(12, 6))
-    for ix, schedule in enumerate([schedule1, schedule2, schedule3]):
+    fig, axes = plt.subplots(2, 2, sharex="col", sharey="row", figsize=(12, 6))
+    for ix, schedule in enumerate([schedule1, schedule2]):
         temp = np.zeros((num_episodes, n_runs))
         for k in range(n_runs):
             env = MDPEnv(delta=schedule)
@@ -414,6 +417,7 @@ def run_shift_experiment(
                 delta_belief=0.9,
                 use_conformal_prediction=use_conformal_prediction,
                 cp_valid_actions=cp_valid_actions,
+                calibration_set_size=calibration_set_size,
             )
             temp[:, k] = run_experiment(agent, env, num_episodes)
         mean_results = temp.mean(axis=1)
@@ -438,7 +442,7 @@ def run_shift_experiment(
         ax.set_yticks([0.1, 0.3, 0.5, 0.7, 0.9])
     fig.suptitle(plot_title)
     fig.savefig(
-        f"{CHARTS_DIR}/distribution_shift_usecp_{str(use_conformal_prediction).lower()}_validactions_{len(cp_valid_actions)}.pdf"
+        f"{CHARTS_DIR}/distribution_shift_usecp_{str(use_conformal_prediction).lower()}_validactions_{len(cp_valid_actions)}_calibsize_{calibration_set_size}.pdf"
     )
 
 
@@ -457,6 +461,18 @@ SHIFT_EXPERIMENTS = [
         use_conformal_prediction=True,
         cp_valid_actions=[1],
         plot_title=r"ConformalAgent with state-action conditiong",
+    ),
+    dict(
+        use_conformal_prediction=True,
+        cp_valid_actions=[0, 1],
+        calibration_set_size=50,
+        plot_title="ConformalAgent with calibration set size 50",
+    ),
+    dict(
+        use_conformal_prediction=True,
+        cp_valid_actions=[0, 1],
+        calibration_set_size=800,
+        plot_title="ConformalAgent with calibration set size 800",
     ),
 ]
 
