@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from crl.graph_utils import despine
 from collections import deque
+from itertools import cycle
 
 # Typing to make function signatures more legible
 type State = int
@@ -446,37 +447,162 @@ def run_shift_experiment(
     )
 
 
-SHIFT_EXPERIMENTS = [
-    dict(
-        use_conformal_prediction=False,
-        cp_valid_actions=[0, 1],
-        plot_title="Agent performance under distributional shift without test-time adaptation",
-    ),
-    dict(
-        use_conformal_prediction=True,
-        cp_valid_actions=[0, 1],
-        plot_title="ConformalAgent without state-action conditiong",
-    ),
-    dict(
-        use_conformal_prediction=True,
-        cp_valid_actions=[1],
-        plot_title=r"ConformalAgent with state-action conditiong",
-    ),
-    dict(
-        use_conformal_prediction=True,
-        cp_valid_actions=[0, 1],
-        calibration_set_size=50,
-        plot_title="ConformalAgent with calibration set size 50",
-    ),
-    dict(
-        use_conformal_prediction=True,
-        cp_valid_actions=[0, 1],
-        calibration_set_size=800,
-        plot_title="ConformalAgent with calibration set size 800",
-    ),
+#
+# --- Experiment configurations -------------------------------------------------
+# Each inner list is a *group* of experiments that will be over‑laid on a single
+# 2×2 figure.  Short, readable titles are used for the legend labels.
+SHIFT_EXPERIMENTS: list[list[dict]] = [
+    [
+        dict(  # exp-1
+            use_conformal_prediction=False,
+            cp_valid_actions=[0, 1],
+            plot_title="No-CP",
+        ),
+        dict(  # exp-2
+            use_conformal_prediction=True,
+            cp_valid_actions=[0, 1],
+            plot_title="CP-Uncond",
+        ),
+        dict(  # exp-3
+            use_conformal_prediction=True,
+            cp_valid_actions=[1],
+            plot_title="CP-Cond",
+        ),
+    ],
+    [
+        dict(  # exp-4
+            use_conformal_prediction=True,
+            cp_valid_actions=[0, 1],
+            calibration_set_size=50,
+            plot_title="CP-Cal-50",
+        ),
+        dict(  # exp-5
+            use_conformal_prediction=True,
+            cp_valid_actions=[0, 1],
+            calibration_set_size=800,
+            plot_title="CP-Cal-800",
+        ),
+    ],
 ]
 
-for exp in SHIFT_EXPERIMENTS:
-    run_shift_experiment(**exp)  # type: ignore
 
+# ------------------------------------------------------------------------------ #
+# Helper utilities for grouped / over-laid shift experiments
+def _compute_mean_std(
+    schedule: list[float],
+    *,
+    num_episodes: int,
+    n_runs: int,
+    agent_kwargs: dict,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Run n_runs episodes of a given δ-schedule and return mean & std returns."""
+    temp = np.zeros((num_episodes, n_runs))
+    for k in range(n_runs):
+        env = MDPEnv(delta=schedule)
+        agent = ConformalAgent(
+            delta_belief=0.9,
+            use_conformal_prediction=agent_kwargs.get(
+                "use_conformal_prediction", False
+            ),
+            cp_valid_actions=agent_kwargs.get("cp_valid_actions", [0, 1]),
+            calibration_set_size=agent_kwargs.get("calibration_set_size", 400),
+        )
+        temp[:, k] = run_experiment(agent, env, num_episodes)
+    return temp.mean(axis=1), temp.std(axis=1)
+
+
+def run_shift_experiment_group(
+    experiments: list[dict],
+    *,
+    num_episodes: int = 2000,
+    n_runs: int = 50,
+    delta_max: float = 0.9,
+    delta_min: float = 0.1,
+    file_suffix: str = "group",
+) -> None:
+    """Overlay a *group* of experiment configs on a single 2x2 figure."""
+    # Figure & axes
+    fig, axes = plt.subplots(2, 2, sharex="col", sharey="row", figsize=(12, 6))
+    colour_cycle = cycle(plt.rcParams["axes.prop_cycle"].by_key()["color"])
+
+    handles: list = []
+    labels: list[str] = []
+
+    for exp_cfg in experiments:
+        colour = next(colour_cycle)
+        label = exp_cfg.get("plot_title", "exp")
+        labels.append(label)
+
+        # Schedules for the two columns (match original logic)
+        sched1 = [delta_max] * (num_episodes // 2) + [delta_min] * (num_episodes // 2)
+        sched2 = np.linspace(delta_max, 0.1, num_episodes).tolist()
+
+        # --- Left column (schedule‑1) ---
+        mean1, std1 = _compute_mean_std(
+            sched1, num_episodes=num_episodes, n_runs=n_runs, agent_kwargs=exp_cfg
+        )
+        (h,) = axes[0, 0].plot(mean1, label=label, color=colour)
+        axes[0, 0].fill_between(
+            range(num_episodes),
+            mean1 - std1,
+            mean1 + std1,
+            color=colour,
+            alpha=0.2,
+            linewidth=0,
+        )
+        axes[1, 0].plot(sched1, color=colour, linewidth=1)
+
+        # --- Right column (schedule‑2) ---
+        mean2, std2 = _compute_mean_std(
+            sched2, num_episodes=num_episodes, n_runs=n_runs, agent_kwargs=exp_cfg
+        )
+        axes[0, 1].plot(mean2, label=label, color=colour)
+        axes[0, 1].fill_between(
+            range(num_episodes),
+            mean2 - std2,
+            mean2 + std2,
+            color=colour,
+            alpha=0.2,
+            linewidth=0,
+        )
+        axes[1, 1].plot(sched2, color=colour, linewidth=1)
+
+        handles.append(h)
+
+    # Cosmetic tweaks (shared across experiments)
+    for col in range(2):
+        despine(axes[0, col])
+        despine(axes[1, col])
+        axes[0, col].set_ylim(-20, 0)
+        axes[1, col].set_yticks([0.1, 0.3, 0.5, 0.7, 0.9])
+
+    axes[0, 0].set_ylabel("Return")
+    axes[1, 0].set_ylabel(r"$\delta$", rotation=0)
+    axes[1, 0].set_xlabel("Episode #")
+    axes[1, 1].set_xlabel("Episode #")
+
+    # Place the legend centred *below* the two columns
+    fig.legend(
+        handles,
+        labels,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.08),
+        ncol=len(labels),
+        frameon=False,
+    )
+
+    fig.subplots_adjust(wspace=0.25, bottom=0.25)
+
+    # Title & save
+    fig.savefig(
+        f"{CHARTS_DIR}/distribution_shift_overlay_{file_suffix}.pdf",
+        bbox_inches="tight",
+    )
+    plt.show()
+
+
+for g_idx, group in enumerate(SHIFT_EXPERIMENTS, start=1):
+    run_shift_experiment_group(group, file_suffix=f"group{g_idx}")
+
+# %%
 # %%
