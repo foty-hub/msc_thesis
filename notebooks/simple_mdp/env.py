@@ -90,4 +90,4 @@ class MDPEnv:
                 self.state = STATE_MAP["goal"]
                 return self.state, -1.0, True  # Reached goal
 
-        raise ValueError(f"Step called from a terminal state or with invalid action.")
+        raise ValueError("Step called from a terminal state or with invalid action.")
