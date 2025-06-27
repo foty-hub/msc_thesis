@@ -94,6 +94,7 @@ class ContinuousSlipWrapper(gym.Wrapper):
     def set_slip_prob(self, p: float) -> None:
         """Override slip probability"""
         self.slip_prob = p
+        self.schedule = None
 
     # ----- gym API ----------------------------------------------------------
     def reset(self, **kwargs):
@@ -139,7 +140,7 @@ class ContinuousSlipWrapper(gym.Wrapper):
         return self.schedule[-1]
 
 
-def make_env(seed) -> Callable[[], ContinuousSlipWrapper]:
+def make_env(seed: int) -> Callable[[], ContinuousSlipWrapper]:
     "Returns a thunk which generates an environment"
 
     def _thunk():
