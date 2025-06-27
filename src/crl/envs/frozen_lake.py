@@ -1,11 +1,11 @@
 import gymnasium as gym
 import numpy as np
-from typing import Sequence, Callable
+from typing import Sequence, Callable, Literal
 
 LEFT, DOWN, RIGHT, UP = 0, 1, 2, 3
 _PERP = {LEFT: (UP, DOWN), RIGHT: (UP, DOWN), UP: (LEFT, RIGHT), DOWN: (LEFT, RIGHT)}
 
-type Schedule = float | Sequence[float] | np.ndarray
+type FloatOrSchedule = float | Sequence[float] | np.ndarray
 
 
 class ContinuousSlipWrapper(gym.Wrapper):
@@ -56,7 +56,7 @@ class ContinuousSlipWrapper(gym.Wrapper):
     def __init__(
         self,
         env: gym.Env,
-        slip_prob: Schedule = 0.2,
+        slip_prob: FloatOrSchedule = 0.2,
         rng: np.random.Generator | None = None,
     ) -> None:
         """
@@ -140,13 +140,18 @@ class ContinuousSlipWrapper(gym.Wrapper):
         return self.schedule[-1]
 
 
-def make_env(seed: int) -> Callable[[], ContinuousSlipWrapper]:
-    "Returns a thunk which generates an environment"
+def make_env(
+    seed: int,
+    slip_prob: FloatOrSchedule = 0.15,
+    map_name: Literal["4x4", "8x8"] = "4x4",
+) -> Callable[[], ContinuousSlipWrapper]:
+    "Returns a thunk which generates a FrozenLake environment"
+    size_map = {"small": "", "big": ""}
 
     def _thunk():
-        base = gym.make("FrozenLake-v1", is_slippery=False)
+        base = gym.make("FrozenLake-v1", is_slippery=False, map_name=map_name)
         return ContinuousSlipWrapper(
-            base, slip_prob=0.15, rng=np.random.default_rng(seed)
+            base, slip_prob=slip_prob, rng=np.random.default_rng(seed)
         )
 
     return _thunk
