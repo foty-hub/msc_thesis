@@ -56,7 +56,7 @@ def get_robust_perf_stats(
         bar = trange(n_bootstrap_samples)
     else:
         bar = range(n_bootstrap_samples)
-    for _ in range(n_bootstrap_samples):
+    for _ in bar:
         bootstrap_indices = np.random.choice(n_runs, size=n_runs, replace=True)
         bootstrap_sample = data[bootstrap_indices, :]
         bootstrap_iqms.append(_iqm(bootstrap_sample))
