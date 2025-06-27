@@ -3,19 +3,20 @@ from simple_mdp import _run_single_shift_experiment
 import numpy as np
 
 NUM_EPISODES = 2_000
-# delta_schedule = [0.9] * 1000 + [0.1] * 1000  # same schedule as before
-delta_schedule = [0.9] * 500 + np.linspace(0.9, 0.1, 1000).tolist() + [0.1] * 500
+delta_schedule = [0.9] * 1000 + [0.1] * 1000  # step function
+# delta_schedule = [0.9] * 500 + np.linspace(0.9, 0.1, 1000).tolist() + [0.1] * 500 # linear decay
 
 # Single run so we can step through it
 mean, std = _run_single_shift_experiment(
     delta_schedule,
     num_episodes=NUM_EPISODES,
-    n_runs=1,
+    n_runs=50,
     agent_kwargs=dict(
         use_conformal_prediction=True,
         calibration_set_size=100,
         cp_valid_actions=[0, 1],
+        alpha=0.99,
     ),
 )
-
 print("Finished run")
+print(np.mean(mean))

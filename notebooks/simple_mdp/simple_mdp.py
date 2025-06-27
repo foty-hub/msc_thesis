@@ -1,11 +1,12 @@
 # %%
 import numpy as np
 import matplotlib.pyplot as plt
-from crl.graph_utils import despine
+from crl.utils.graphing import despine
 from itertools import cycle
 from agent import SimpleAgent, ConformalAgent
 from env import MDPEnv
 
+CHARTS_DIR = "../../results/figures/basic_mdp"
 
 # --- Experiment Runner ---
 
@@ -55,6 +56,7 @@ def run_experiment(agent, env, num_episodes: int) -> np.ndarray:
 
 # %%
 
+
 NUM_EPISODES = 2000
 risky_reward = -1
 env_delta = 0.9
@@ -69,8 +71,7 @@ dumb_returns = run_experiment(dumb_agent, env, NUM_EPISODES)
 smart_agent = ConformalAgent(delta_belief=model_delta, use_conformal_prediction=False)
 
 
-# reverse so colours are in descending order in the legend
-def run_basic_experiment(env_delta: float, window: int = 100) -> np.ndarray:
+def _run_basic_experiment(env_delta: float, window: int = 100) -> np.ndarray:
     env = MDPEnv(delta=env_delta, a_short_return_reward=risky_reward)
     # --- Rolling average smoothing ---
     returns = run_experiment(smart_agent, env, NUM_EPISODES)
@@ -83,10 +84,11 @@ def run_basic_experiment(env_delta: float, window: int = 100) -> np.ndarray:
 # EXPERIMENT - Comparing loss in reward due to distributional shift
 window = 100
 n_runs = 50
+# reverse so colours are in descending order in the legend
 for env_delta in reversed([0.1, 0.3, 0.5, 0.7, 0.9]):
     results = np.zeros((NUM_EPISODES - window + 1, n_runs))
     for k in range(n_runs):
-        results[:, k] = run_basic_experiment(env_delta, window)
+        results[:, k] = _run_basic_experiment(env_delta, window)
 
     # average over the runs
     mean = results.mean(1)
@@ -115,7 +117,6 @@ plt.ylabel(r"Reward")
 plt.xlabel(r"Episode #")
 despine(plt.gca())
 plt.grid(visible=True, which="major", axis="y", alpha=0.4)
-CHARTS_DIR = "../../results/figures/basic_mdp"
 plt.savefig(
     f"{CHARTS_DIR}/agent_belief_nruns_{n_runs}_smoothing_{window}_risk_reward_{int(np.abs(risky_reward))}.pdf",
     bbox_inches="tight",
@@ -218,6 +219,29 @@ SHIFT_EXPERIMENTS: list[list[dict]] = [
             plot_title="0.9 -> 0.1",
         ),
     ],
+    [  # Comparing different values of alpha
+        dict(
+            use_conformal_prediction=True,
+            cp_valid_actions=[1],
+            calibration_set_size=100,
+            alpha=0.99,
+            plot_title=r"$\alpha$=0.99",
+        ),
+        dict(
+            use_conformal_prediction=True,
+            cp_valid_actions=[1],
+            calibration_set_size=100,
+            alpha=0.95,
+            plot_title=r"$\alpha$=0.95",
+        ),
+        dict(
+            use_conformal_prediction=True,
+            cp_valid_actions=[1],
+            calibration_set_size=100,
+            alpha=0.9,
+            plot_title=r"$\alpha$=0.9",
+        ),
+    ],
 ]
 
 
@@ -241,6 +265,7 @@ def _run_single_shift_experiment(
             ),
             cp_valid_actions=agent_kwargs.get("cp_valid_actions", [0, 1]),
             calibration_set_size=agent_kwargs.get("calibration_set_size", 400),
+            alpha=agent_kwargs.get("alpha", 0.9),
         )
         temp[:, k] = run_experiment(agent, env, num_episodes)
     return temp.mean(axis=1), temp.std(axis=1)
