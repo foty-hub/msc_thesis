@@ -13,3 +13,6 @@ data/
 
 # ignore testing model path
 notebooks/checkpoints
+
+# ignore logging
+wandb/
