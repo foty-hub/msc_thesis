@@ -1,17 +1,25 @@
 # Conformal Prediction for RL - MSc Thesis
 
 ## Installation
-I recommend the use of `uv` to manage dependencies:
+I strongly recommend the use of `uv` to manage dependencies - download [here](https://docs.astral.sh/uv/):
 ```bash
 >>> uv sync
 >>> uv pip install -e .
 ```
 
-Otherwise, the following pip install should work:
+Otherwise, the following default pip install should work (not yet tested):
 ```bash
+>>> python -m venv .venv
+>>> source .venv/bin/activate
 >>> pip install .
 ``` 
 
 ## Repo Structure
 
-Currently, all the logic lives in notebooks in the `notebooks/` dir. I'm starting to move this into proper `.py` files step by step as the structure begins to coalesce.
+Currently, all the experiments live in notebooks in the `notebooks/` dir. These are being moved into proper `.py` files as the structure begins to coalesce.
+
+
+## Tests
+```bash
+>>> uv run pytest
+```
