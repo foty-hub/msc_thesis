@@ -70,7 +70,7 @@ def train_agent_and_capture_trajectories(
 
             state_next, reward, terminated, truncated, info = env.step(action)
             obs = (state, action, reward, state_next)
-            agent.observe(obs)
+            agent.observe(obs)  # type: ignore
             state = state_next
             agent.plan()
             done = terminated or truncated
@@ -96,8 +96,8 @@ def visualize_trajectories(trajectories, value_functions):
     fig, (ax_grid, ax_preds) = plt.subplots(1, 2, figsize=(12, 6))
     plt.subplots_adjust(bottom=0.35)
 
-    ax_episode = plt.axes([0.25, 0.15, 0.65, 0.03])
-    ax_step = plt.axes([0.25, 0.05, 0.65, 0.03])
+    ax_episode = plt.axes([0.25, 0.15, 0.65, 0.03])  # type: ignore
+    ax_step = plt.axes([0.25, 0.05, 0.65, 0.03])  # type: ignore
 
     episodes = sorted(trajectories.keys())
 
@@ -160,10 +160,10 @@ def visualize_trajectories(trajectories, value_functions):
             r, c = divmod(s, 4)
             if s in [5, 7, 11, 12]:
                 ax_grid.add_patch(
-                    plt.Rectangle((c - 0.5, 2.5 - r), 1, 1, color="black")
+                    plt.Rectangle((c - 0.5, 2.5 - r), 1, 1, color="black")  # type: ignore
                 )
             if s == 15:
-                ax_grid.add_patch(plt.Rectangle((c - 0.5, 2.5 - r), 1, 1, color="gold"))
+                ax_grid.add_patch(plt.Rectangle((c - 0.5, 2.5 - r), 1, 1, color="gold"))  # type: ignore
 
         r, c = divmod(state, 4)
         ax_grid.text(c, 3 - r, "A", ha="center", va="center", color="red", fontsize=20)
@@ -200,8 +200,8 @@ def visualize_trajectories(trajectories, value_functions):
     episode_slider.on_changed(update_episode)
     step_slider.on_changed(update_step)
 
-    fig.episode_slider = episode_slider
-    fig.step_slider = step_slider
+    fig.episode_slider = episode_slider  # type: ignore
+    fig.step_slider = step_slider  # type: ignore
 
     update_episode(min(episodes))
     plt.show()
