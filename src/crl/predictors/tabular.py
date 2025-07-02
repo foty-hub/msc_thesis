@@ -35,8 +35,8 @@ class NoPredictor:
 class PredictorSAConditioned:
     def __init__(
         self,
-        S: int,
-        A: int,
+        n_states: int,
+        n_actions: int,
         alpha: float,
         n_calib: int = 100,
         min_count: int | None = None,
@@ -48,10 +48,10 @@ class PredictorSAConditioned:
         self.min_count = min_count or n_calib
 
         # sets up the calibration sets with a deque per state-action pair. Note this is very gnarly memory-wise for non trivial MDPs
-        self.calib_set = np.empty((S, A), dtype=object)
-        for i, j in np.ndindex(S, A):
+        self.calib_set = np.empty((n_states, n_actions), dtype=object)
+        for i, j in np.ndindex(n_states, n_actions):
             self.calib_set[i, j] = deque(maxlen=n_calib)
-        self.qhat = np.zeros((S, A)) + 1.0
+        self.qhat = np.zeros((n_states, n_actions)) + 1.0
 
     def conformalise(
         self, preds: np.ndarray, state: "State", action: "Action"
