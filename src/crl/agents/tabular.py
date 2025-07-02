@@ -41,8 +41,8 @@ class DynaVAgent:
         params: AgentParams,
         predictor: Predictor,
     ) -> None:
-        S = env.observation_space.n
-        A = env.action_space.n
+        S: int = env.observation_space.n  # type: ignore
+        A: int = env.action_space.n  # type: ignore
 
         # setup world model, reward model and value function
         self._setup_models(S, A)
@@ -117,8 +117,11 @@ class DynaVAgent:
 
         # model learning - counting since tabular
         self.N[s, a, s_prime] += 1
-        self.world_model[s, a, :] = self.N[s, a, :] / self.N[s, a, :].sum()
-        self.reward_model[s, a] = r
+        count_sa = self.N[s, a, :].sum()  # total (s, a) visits
+        self.world_model[s, a, :] = self.N[s, a, :] / count_sa
+
+        # Online update - expected reward
+        self.reward_model[s, a] += (r - self.reward_model[s, a]) / count_sa
 
         self.predictor.observe(obs, self.world_model[s, a, s_prime])
 
