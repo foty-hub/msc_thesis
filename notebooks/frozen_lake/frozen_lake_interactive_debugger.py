@@ -30,6 +30,7 @@ def train_agent_and_capture_trajectories(
 
     trajectories = {}
     value_functions = {}
+    returns = []
 
     for episode in range(n_episodes):
         if episode > 0:
@@ -72,7 +73,7 @@ def train_agent_and_capture_trajectories(
             obs = (state, action, reward, state_next)
             agent.observe(obs)  # type: ignore
             state = state_next
-            agent.plan()
+            # agent.plan()
             done = terminated or truncated
 
         if is_capturing_episode:
@@ -87,8 +88,9 @@ def train_agent_and_capture_trajectories(
             )
             trajectories[episode] = episode_trajectory
             value_functions[episode] = agent.V.copy()
+            returns.append(reward)
 
-    return agent, trajectories, value_functions
+    return agent, trajectories, value_functions, returns
 
 
 def visualize_trajectories(trajectories, value_functions):
@@ -177,6 +179,7 @@ def visualize_trajectories(trajectories, value_functions):
         ax_preds.set_ylabel("Probability")
         ax_preds.set_xticks(range(16))
         ax_preds.set_xticklabels(range(16), rotation=90)
+        ax_preds.set_ylim(0, 1)
 
         for s_next in conformal_set:
             ax_preds.get_children()[s_next].set_color("salmon")
@@ -208,5 +211,15 @@ def visualize_trajectories(trajectories, value_functions):
 
 
 if __name__ == "__main__":
-    agent, trajectories, value_functions = train_agent_and_capture_trajectories()
+    agent, trajectories, value_functions, returns = (
+        train_agent_and_capture_trajectories(
+            rng=1
+        )  # specific seed with a performance crash
+    )
     visualize_trajectories(trajectories, value_functions)
+    # returns = np.array(returns)
+    # mid_100_returns = returns[900:1000].mean()
+    # last_100_returns = returns[1400:].mean()
+    # print(f"Seed: {i}")
+    # print(f"Mean return 1400-1500: {mid_100_returns:.3f}")
+    # print(f"Mean return 1900-2000: {last_100_returns:.3f}")
