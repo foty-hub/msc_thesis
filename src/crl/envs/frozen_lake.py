@@ -146,7 +146,6 @@ def make_env(
     map_name: Literal["4x4", "8x8"] = "4x4",
 ) -> Callable[[], ContinuousSlipWrapper]:
     "Returns a thunk which generates a FrozenLake environment"
-    size_map = {"small": "", "big": ""}
 
     def _thunk():
         base = gym.make("FrozenLake-v1", is_slippery=False, map_name=map_name)
