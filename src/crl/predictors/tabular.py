@@ -65,7 +65,7 @@ class PredictorSAConditioned:
         prediction_sets = preds >= (1 - self.qhat[state, action])
         prediction_sets = np.flatnonzero(prediction_sets).tolist()
         if not prediction_sets:
-            return [preds.argmax()]  # type: ignore
+            return [int(preds.argmax())]
 
         return prediction_sets
 
@@ -99,7 +99,7 @@ class PredictorGlobal:
         prediction_sets = preds >= (1 - self.qhat)
         prediction_sets = np.flatnonzero(prediction_sets).tolist()
         if not prediction_sets:
-            return [preds.argmax()]  # type: ignore
+            return [int(preds.argmax())]
 
         return prediction_sets
 
