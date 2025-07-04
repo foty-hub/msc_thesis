@@ -40,7 +40,6 @@ class PredictorSAConditioned:
         alpha: float,
         n_calib: int = 100,
         min_count: int | None = None,
-        rng: int | None = None,
     ):
         self.alpha = alpha
         self.q_level = np.ceil((n_calib + 1) * (1 - alpha)) / n_calib
@@ -53,8 +52,6 @@ class PredictorSAConditioned:
         for i, j in np.ndindex(n_states, n_actions):
             self.calib_set[i, j] = deque(maxlen=n_calib)
         self.qhat = np.zeros((n_states, n_actions)) + 1.0
-
-        self.rng = np.random.default_rng(rng)
 
     def conformalise(
         self, preds: np.ndarray, state: "State", action: "Action"
@@ -74,8 +71,8 @@ class PredictorSAConditioned:
 
     def observe(self, obs: "Observation", wm_prob: float) -> None:
         s, a, r, s_prime = obs
-        # tiny amount of noise to jitter scores to prevent collapse when wm is fixed
-        self.calib_set[s, a].append(1 - wm_prob + 1e-8 * self.rng.random())
+        # add a tiny offset to mitigate fp error overestimating 1 - qhat
+        self.calib_set[s, a].append(1 - wm_prob + 1e-8)
         self.qhat[s, a] = np.quantile(
             self.calib_set[s, a], self.q_level, method="higher"
         )
@@ -87,7 +84,6 @@ class PredictorGlobal:
         alpha: float,
         n_calib: int = 100,
         min_count: int | None = None,
-        rng: int | None = None,
     ) -> None:
         self.alpha = alpha
         self.q_level = np.ceil((n_calib + 1) * (1 - alpha)) / n_calib
@@ -97,8 +93,6 @@ class PredictorGlobal:
 
         self.calib_set = deque(maxlen=n_calib)
         self.qhat = 1.0
-
-        self.rng = np.random.default_rng(rng)
 
     def conformalise(
         self, preds: np.ndarray, state: "State", action: "Action"
@@ -114,9 +108,8 @@ class PredictorGlobal:
         return prediction_sets
 
     def observe(self, obs: "Observation", wm_prob: float) -> None:
-        # add a tiny amount of noise to jitter the scores, this prevents calibration set
-        # collapse when the world model is stable
-        self.calib_set.append(1 - wm_prob + 1e-8 * self.rng.random())
+        # add a tiny offset to mitigate fp error overestimating 1 - qhat
+        self.calib_set.append(1 - wm_prob + 1e-8)
         self.qhat = np.quantile(self.calib_set, self.q_level, method="higher")
 
 
