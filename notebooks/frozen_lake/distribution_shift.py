@@ -110,7 +110,7 @@ all_returns = {p.__name__: [] for p in PREDICTORS}
 agents = {}
 cp_start_episode = 1_500
 dist_shift_episode = 2_000
-alpha = 0.1
+alpha = 0.03
 
 for predictor_class in tqdm(PREDICTORS):
     # print(f"Running experiments for predictor={predictor_class.__name__}...")
@@ -173,6 +173,27 @@ plt.axvline(x=dist_shift_episode, linestyle="--", color="red", label="Dist. Shif
 plt.tight_layout()
 plt.show()
 
+
+# %%
 # histogram of the 100 final returns
+bins = np.linspace(0, 1, 20)
+
+fig, axes = plt.subplots(nrows=3, ncols=1, sharex=True, sharey=True, figsize=(6, 9))
+
+axes[0].hist(returns_hist["PredictorSAConditioned"], bins=bins, alpha=0.8)
+axes[0].set_title("PredictorSAConditioned")
+
+axes[1].hist(returns_hist["PredictorGlobal"], bins=bins, alpha=0.8)
+axes[1].set_title("PredictorGlobal")
+
+axes[2].hist(returns_hist["NoPredictor"], bins=bins, alpha=0.8)
+axes[2].set_title("NoPredictor")
+
+# Optional: enforce identical limits explicitly (sharex/sharey already sync them)
+axes[0].set_xlim(bins[0], bins[-1])
+axes[0].set_ylim(bottom=0)
+
+plt.tight_layout()
+plt.show()
 
 # %%
