@@ -5,6 +5,7 @@ from crl.envs.frozen_lake import make_env
 from crl.utils.graphing import get_robust_perf_stats, plot_robust_perf_curve, despine
 from crl.predictors.tabular import PredictorGlobal, PredictorSAConditioned, NoPredictor
 from crl.agents.tabular import DynaVAgent, AgentParams, Reward
+from matplotlib.legend_handler import HandlerTuple
 
 from joblib import Parallel, delayed
 from tqdm import tqdm
@@ -69,7 +70,7 @@ def train_agent(
 
 # Define the function to be parallelized
 def run_single_experiment(
-    slip_prob: float, seed: int, alpha: float = 0.2, start_cp: float = 1_500
+    slip_prob: float, seed: int, alpha: float = 0.2, start_cp: int = 1_500
 ) -> tuple[DynaVAgent, list[float]]:
     # This function should contain the logic for one run
     # Note: It's often better to instantiate the agent and env inside
@@ -97,13 +98,12 @@ for slip_prob in tqdm(all_returns):
 
     # Wrap the Parallel object, which is a generator of results
     results = Parallel(n_jobs=-1)(tasks)
-    all_returns[slip_prob] = [res[1] for res in results]
+    all_returns[slip_prob] = [res[1] for res in results]  # type: ignore
 
     # save an agent from each run to play around with
-    agents[slip_prob] = results[0][0]
+    agents[slip_prob] = results[0][0]  # type: ignore
 
 # %%
-from matplotlib.legend_handler import HandlerTuple
 
 fig, ax = plt.subplots(figsize=(10, 6))
 legend_handles = []
