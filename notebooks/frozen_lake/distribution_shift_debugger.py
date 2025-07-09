@@ -111,7 +111,7 @@ dist_shift_episode = 2_000
 alpha = 0.1
 
 run_single_experiment(
-    PredictorSAConditioned,
+    PredictorGlobal,
     seed=42,
     alpha=0.1,
     start_cp=cp_start_episode,

@@ -21,10 +21,10 @@ def train_agent(
     n_episodes_shifted: int = 2_000,
     epsilon_init: float = 1.0,
     rng: int = 42,
-    lr: float = 0.1,
+    lr: float = 0.05,
     alpha: float = 0.05,
     start_cp: int = 1_500,
-) -> tuple[Agent, list[Reward]]:
+) -> tuple[Agent, list[Reward], list[float]]:
     # setup env
     env = make_env(seed=rng, slip_prob=slip_prob_initial)()
 
@@ -36,13 +36,16 @@ def train_agent(
             alpha=alpha,
             n_calib=200,
         )
+        adaptation_scale = 10
     elif predictor_class == PredictorGlobal:
         predictor = predictor_class(
             alpha=alpha,
             n_calib=200,
         )
+        adaptation_scale = 10
     else:  # NoPredictor
         predictor = predictor_class()
+        adaptation_scale = 1
 
     # params = DynaAgentParams(
     #     learning_rate=lr, epsilon=epsilon_init, discount=0.95, rng=rng
@@ -53,13 +56,14 @@ def train_agent(
         epsilon=epsilon_init,
         discount=0.95,
         rng=rng,
-        adaptation_scale=10,
+        adaptation_scale=adaptation_scale,
         use_predictor=True,
     )
     agent = AdaptiveLearningAgent(env, params, predictor)
 
     # train the agent
     returns = []
+    lrs = []
     for episode in range(n_episodes_initial + n_episodes_shifted):
         if episode == n_episodes_initial:
             env.set_slip_prob(slip_prob_final)
@@ -90,8 +94,9 @@ def train_agent(
             done = terminated or truncated
             if done:
                 returns.append(reward)
+                lrs.append(agent.learning_rate)
 
-    return agent, returns
+    return agent, returns, lrs
 
 
 # %%
@@ -104,21 +109,22 @@ def run_single_experiment(
     alpha: float = 0.2,
     start_cp: int = 1_500,
     dist_shift_episode: int = 2_000,
-) -> tuple[Agent, list[float]]:
-    agent, exp_returns = train_agent(
+) -> tuple[Agent, list[float], list[float]]:
+    agent, exp_returns, lrs = train_agent(
         predictor_class=predictor_class,
         rng=seed,
         alpha=alpha,
         start_cp=start_cp,
         n_episodes_shifted=dist_shift_episode,
     )
-    return agent, exp_returns
+    return agent, exp_returns, lrs
 
 
 # Main loop
 n_runs = 50
 PREDICTORS = [NoPredictor, PredictorGlobal, PredictorSAConditioned]
 all_returns = {p.__name__: [] for p in PREDICTORS}
+all_lrs = {p.__name__: [] for p in PREDICTORS}
 agents = {}
 cp_start_episode = 1_500
 dist_shift_episode = 2_000
@@ -139,6 +145,7 @@ for predictor_class in tqdm(PREDICTORS):
 
     results = Parallel(n_jobs=-1)(tasks)
     all_returns[predictor_class.__name__] = [res[1] for res in results]  # type: ignore
+    all_lrs[predictor_class.__name__] = [res[2] for res in results]  # type: ignore
 
     # save an agent from each run to play around with
     agents[predictor_class.__name__] = results[0][0]  # type: ignore
@@ -146,17 +153,19 @@ for predictor_class in tqdm(PREDICTORS):
 # %%
 from matplotlib.legend_handler import HandlerTuple
 
-fig, ax = plt.subplots(figsize=(10, 6))
+fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=True, figsize=(10, 10))
 legend_handles = []
 legend_labels = []
 metrics = {}
 returns_hist = {}
+learning_rate_metrics = {}
 
+# --- top subplot: returns ---
 for ix, predictor_name in enumerate(all_returns):
     exp_returns = np.array(all_returns[predictor_name])
     stats = get_robust_perf_stats(exp_returns, n_bootstrap_samples=2000, pbar=True)
     handle, label = plot_robust_perf_curve(
-        ax, stats, label=f"{predictor_name}", color=f"C{ix}", smooth=10
+        ax1, stats, label=f"{predictor_name}", color=f"C{ix}", smooth=10
     )
     legend_handles.append(handle)
     legend_labels.append(label)
@@ -164,24 +173,43 @@ for ix, predictor_name in enumerate(all_returns):
     metrics[predictor_name] = stats["iqm"][-100:].mean()
     returns_hist[predictor_name] = exp_returns[:, -100:].mean(1)
 
+# --- bottom subplot: learning rate ---
+for ix, predictor_name in enumerate(all_lrs):
+    exp_lrs = np.array(all_lrs[predictor_name])
+    stats_lr = get_robust_perf_stats(exp_lrs, n_bootstrap_samples=2000, pbar=True)
+    plot_robust_perf_curve(
+        ax2, stats_lr, label=f"{predictor_name}", color=f"C{ix}", smooth=10
+    )
+    learning_rate_metrics[predictor_name] = stats_lr["iqm"][-100:].mean()
+
+# Optional summary prints
 for predictor_name, asym_return in metrics.items():
     print(f"Predictor: {predictor_name}, Last 100 eps IQM: {asym_return:0.3f}")
+for predictor_name, asym_lr in learning_rate_metrics.items():
+    print(f"Predictor: {predictor_name}, Last 100 eps LR IQM: {asym_lr:0.6f}")
 
-
-despine(ax)
-ax.set_title("Performance of agents under distribution shift")
-ax.set_xlabel("Training Steps")
-ax.set_ylabel("Performance (IQM of Returns)")
-ax.legend(
+# Formatting
+despine(ax1)
+despine(ax2)
+ax1.set_title("Performance of agents under distribution shift")
+ax1.set_ylabel("Performance (IQM of Returns)")
+ax2.set_title("Learning Rate over Training")
+ax2.set_xlabel("Training Steps")
+ax2.set_ylabel("Learning Rate (IQM)")
+ax1.legend(
     legend_handles,
     legend_labels,
     handler_map={tuple: HandlerTuple(ndivide=1, pad=0)},
     frameon=False,
     loc="best",
 )
-ax.grid(axis="y", linestyle="--", alpha=0.7)
-plt.axvline(x=cp_start_episode, linestyle="--", color="grey", label="CP Starts")
-plt.axvline(x=dist_shift_episode, linestyle="--", color="red", label="Dist. Shift")
+
+# vertical reference lines
+for ax in (ax1, ax2):
+    ax.grid(axis="y", linestyle="--", alpha=0.7)
+    ax.axvline(x=cp_start_episode, linestyle="--", color="grey")
+    ax.axvline(x=dist_shift_episode, linestyle="--", color="red")
+
 plt.tight_layout()
 plt.show()
 
