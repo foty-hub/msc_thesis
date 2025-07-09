@@ -16,6 +16,8 @@ class Predictor(Protocol):
 
     def observe(self, obs: "Observation", wm_prob: float) -> None: ...
 
+    def mean_score(self, state: State, action: Action) -> float: ...
+
 
 class NoPredictor:
     "A no-op predictor - doesn't do any conformal prediction"
@@ -31,6 +33,9 @@ class NoPredictor:
     def observe(self, obs: "Observation", wm_prob: float) -> None:
         pass
 
+    def mean_score(self, state: State, action: Action) -> float:
+        return 0.0
+
 
 class PredictorSAConditioned:
     def __init__(
@@ -42,7 +47,7 @@ class PredictorSAConditioned:
         min_count: int | None = None,
     ):
         self.alpha = alpha
-        self.q_level = np.ceil((n_calib + 1) * (1 - alpha)) / n_calib
+        self.q_level = min(1.0, np.ceil((n_calib + 1) * (1 - alpha)) / n_calib)
 
         # if min_count is not specified, require a calibration set to be full to use it
         self.min_count = min_count or n_calib
@@ -77,6 +82,9 @@ class PredictorSAConditioned:
             self.calib_set[s, a], self.q_level, method="higher"
         )
 
+    def mean_score(self, state: State, action: Action) -> float:
+        return np.mean(self.calib_set[state, action])
+
 
 class PredictorGlobal:
     def __init__(
@@ -86,7 +94,7 @@ class PredictorGlobal:
         min_count: int | None = None,
     ) -> None:
         self.alpha = alpha
-        self.q_level = np.ceil((n_calib + 1) * (1 - alpha)) / n_calib
+        self.q_level = min(1.0, np.ceil((n_calib + 1) * (1 - alpha)) / n_calib)
 
         # if min_count is not specified, require a calibration set to be full to use it
         self.min_count = min_count or n_calib
@@ -111,6 +119,9 @@ class PredictorGlobal:
         # add a tiny offset to mitigate fp error overestimating 1 - qhat
         self.calib_set.append(1 - wm_prob + 1e-8)
         self.qhat = np.quantile(self.calib_set, self.q_level, method="higher")
+
+    def mean_score(self, state: State, action: Action) -> float:
+        return np.mean(self.calib_set)  # type: ignore
 
 
 assert issubclass(NoPredictor, Predictor)
