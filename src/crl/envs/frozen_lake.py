@@ -144,11 +144,17 @@ def make_env(
     seed: int,
     slip_prob: FloatOrSchedule = 0.15,
     map_name: Literal["4x4", "8x8"] = "4x4",
+    max_episode_steps: int = 100,
 ) -> Callable[[], ContinuousSlipWrapper]:
     "Returns a thunk which generates a FrozenLake environment"
 
     def _thunk():
-        base = gym.make("FrozenLake-v1", is_slippery=False, map_name=map_name)
+        base = gym.make(
+            "FrozenLake-v1",
+            is_slippery=False,
+            map_name=map_name,
+            max_episode_steps=max_episode_steps,
+        )
         return ContinuousSlipWrapper(
             base, slip_prob=slip_prob, rng=np.random.default_rng(seed)
         )
