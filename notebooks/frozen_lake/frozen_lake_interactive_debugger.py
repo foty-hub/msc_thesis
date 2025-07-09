@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 import matplotlib.patches as mpatches
 from crl.envs.frozen_lake import make_env
-from crl.agents.tabular import DynaVAgent, AgentParams
+from crl.agents.tabular.dyna import DynaVAgent, DynaAgentParams
 from crl.predictors.tabular import PredictorSAConditioned
 
 ACTION_MAP = {"left": 0, "down": 1, "right": 2, "up": 3}
@@ -19,10 +19,13 @@ def train_agent_and_capture_trajectories(
     lr: float = 0.1,
     alpha: float = 0.2,
     start_cp: int = 1500,
+    max_episode_steps: int = 100,
 ):
     """Trains a Dyna-V agent and captures trajectories for episodes after a certain point."""
-    env = make_env(seed=rng, slip_prob=slip_prob)()
-    params = AgentParams(learning_rate=lr, epsilon=epsilon_init, discount=0.99, rng=rng)
+    env = make_env(seed=rng, slip_prob=slip_prob, max_episode_steps=max_episode_steps)()
+    params = DynaAgentParams(
+        learning_rate=lr, epsilon=epsilon_init, discount=0.99, rng=rng
+    )
     predictor = PredictorSAConditioned(
         n_states=16, n_actions=4, alpha=alpha, n_calib=100
     )
@@ -213,7 +216,7 @@ def visualize_trajectories(trajectories, value_functions):
 if __name__ == "__main__":
     agent, trajectories, value_functions, returns = (
         train_agent_and_capture_trajectories(
-            rng=1
+            rng=2, alpha=0.005, slip_prob=0.6
         )  # specific seed with a performance crash
     )
     visualize_trajectories(trajectories, value_functions)

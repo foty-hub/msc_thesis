@@ -4,7 +4,8 @@ import matplotlib.pyplot as plt
 from crl.envs.frozen_lake import make_env
 from crl.utils.graphing import get_robust_perf_stats, plot_robust_perf_curve, despine
 from crl.predictors.tabular import PredictorGlobal, PredictorSAConditioned, NoPredictor
-from crl.agents.tabular import DynaVAgent, AgentParams, Reward
+from crl.agents.tabular.dyna import DynaVAgent, DynaAgentParams
+from crl.agents.tabular.types import Reward
 from matplotlib.legend_handler import HandlerTuple
 
 from joblib import Parallel, delayed
@@ -25,7 +26,9 @@ def train_agent(
     env = make_env(seed=rng, slip_prob=slip_prob)()
 
     # setup agent
-    params = AgentParams(learning_rate=lr, epsilon=epsilon_init, discount=0.99, rng=rng)
+    params = DynaAgentParams(
+        learning_rate=lr, epsilon=epsilon_init, discount=0.99, rng=rng
+    )
     predictor = PredictorSAConditioned(
         n_states=16, n_actions=4, alpha=alpha, n_calib=100
     )

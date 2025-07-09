@@ -4,7 +4,9 @@ import matplotlib.pyplot as plt
 from crl.envs.frozen_lake import make_env
 from crl.utils.graphing import get_robust_perf_stats, plot_robust_perf_curve, despine
 from crl.predictors.tabular import PredictorGlobal, PredictorSAConditioned, NoPredictor
-from crl.agents.tabular import DynaVAgent, AgentParams, Reward
+from crl.agents.tabular.dyna import DynaVAgent, DynaAgentParams
+from crl.agents.tabular.types import Reward, Agent
+from crl.agents.tabular.adaptive import AdaptiveLearningAgent, AdaptiveAgentParams
 
 from joblib import Parallel, delayed
 from tqdm import tqdm
@@ -14,7 +16,7 @@ from tqdm import tqdm
 def train_agent(
     predictor_class,
     slip_prob_initial: float = 0.05,
-    slip_prob_final: float = 0.3,
+    slip_prob_final: float = 0.6,
     n_episodes_initial: int = 2_000,
     n_episodes_shifted: int = 2_000,
     epsilon_init: float = 1.0,
@@ -22,29 +24,39 @@ def train_agent(
     lr: float = 0.1,
     alpha: float = 0.05,
     start_cp: int = 1_500,
-) -> tuple[DynaVAgent, list["Reward"]]:
+) -> tuple[Agent, list[Reward]]:
     # setup env
     env = make_env(seed=rng, slip_prob=slip_prob_initial)()
 
     # setup agent
-    params = AgentParams(learning_rate=lr, epsilon=epsilon_init, discount=0.95, rng=rng)
     if predictor_class == PredictorSAConditioned:
         predictor = predictor_class(
             n_states=16,
             n_actions=4,
             alpha=alpha,
             n_calib=200,
-            rng=rng,
         )
     elif predictor_class == PredictorGlobal:
         predictor = predictor_class(
             alpha=alpha,
             n_calib=200,
-            rng=rng,
         )
     else:  # NoPredictor
         predictor = predictor_class()
-    agent = DynaVAgent(env, params, predictor)
+
+    # params = DynaAgentParams(
+    #     learning_rate=lr, epsilon=epsilon_init, discount=0.95, rng=rng
+    # )
+    # agent = DynaVAgent(env, params, predictor)
+    params = AdaptiveAgentParams(
+        learning_rate=lr,
+        epsilon=epsilon_init,
+        discount=0.95,
+        rng=rng,
+        adaptation_scale=10,
+        use_predictor=True,
+    )
+    agent = AdaptiveLearningAgent(env, params, predictor)
 
     # train the agent
     returns = []
@@ -92,7 +104,7 @@ def run_single_experiment(
     alpha: float = 0.2,
     start_cp: int = 1_500,
     dist_shift_episode: int = 2_000,
-) -> tuple[DynaVAgent, list[float]]:
+) -> tuple[Agent, list[float]]:
     agent, exp_returns = train_agent(
         predictor_class=predictor_class,
         rng=seed,
