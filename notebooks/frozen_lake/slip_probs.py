@@ -23,7 +23,7 @@ def train_agent(
     start_cp: int = 1_500,
 ) -> tuple[DynaVAgent, list["Reward"]]:
     # setup env
-    env = make_env(seed=rng, slip_prob=slip_prob)()
+    env = make_env(seed=rng, slip_prob=slip_prob, max_episode_steps=500)()
 
     # setup agent
     params = DynaAgentParams(
@@ -94,7 +94,7 @@ for slip_prob in tqdm(all_returns):
     # print(f"Running experiments for slip_prob={slip_prob}...")
     tasks = (
         delayed(run_single_experiment)(
-            slip_prob, run, alpha=0.2, start_cp=cp_start_episode
+            slip_prob, run, alpha=0.01, start_cp=cp_start_episode
         )
         for run in range(n_runs)
     )
@@ -143,3 +143,5 @@ ax.grid(axis="y", linestyle="--", alpha=0.7)
 plt.axvline(x=cp_start_episode, linestyle="--")
 plt.tight_layout()
 plt.show()
+
+# %%

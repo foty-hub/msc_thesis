@@ -85,9 +85,11 @@ class DynaVAgent:
                 next_states = self.predictor.conformalise(wm_predictions, s, a)
             else:
                 next_states = _nopred.conformalise(wm_predictions, s, a)
-            G_worstcase = self.reward_model[s, a] + self.discount * min(
-                self.V[s_pred] for s_pred in next_states
+
+            G_worstcase = (
+                self.reward_model[s, a] + self.discount * self.V[next_states].min()
             )
+
             if G_worstcase > v_next:
                 v_next = G_worstcase
                 a_next = a
