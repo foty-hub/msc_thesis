@@ -15,7 +15,7 @@ from discretise import build_grid_tiling
 
 # fmt: off
 DISCOUNT = 0.99             # Gamma/discount factor for the DQN
-STATE_BINS = [8, 8, 8, 8]   # num. bins per dimension for coarse grid tiling
+STATE_BINS = [6, 6, 6, 6]   # num. bins per dimension for coarse grid tiling
 ALPHA = 0.1                 # Conformal prediction miscoverage level
 MIN_CALIB = 50              # Minimum threshold for a calibration set to be leveraged
 NUM_EXPERIMENTS = 25
@@ -146,12 +146,13 @@ def fill_calib_sets(
             scores=deque(maxlen=maxlen),
         )
 
-    # now construct the datasets
+    # now construct the calibration sets
     for transition in buffer[:-1]:
-        # extract a transition - add it to the calibration set
+        # extract a transition and add it to the calibration set
         with torch.no_grad():
             q_pred = model.q_net(model.policy.obs_to_tensor(transition.state)[0])
             y_pred = q_pred[0, transition.action]
+            # Value of the terminal state is 0 by definition.
             if transition.done:
                 y_true = transition.reward
             else:
