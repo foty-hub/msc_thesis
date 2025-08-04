@@ -17,6 +17,8 @@ notebooks/checkpoints
 # ignore logging
 wandb/
 
+*.pkl
+
 # Ignore CartPole experimental results
 results/cartpole/*/*.png
 results/cartpole/*/*.pkl
