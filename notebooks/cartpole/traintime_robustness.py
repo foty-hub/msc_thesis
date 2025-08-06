@@ -5,8 +5,6 @@ import gymnasium as gym
 
 from tqdm import tqdm
 from typing import Any
-from stable_baselines3 import A2C, DQN
-from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
 from crl.cons.calib import compute_lower_bounds, collect_transitions, fill_calib_sets
 from crl.cons.cartpole import (

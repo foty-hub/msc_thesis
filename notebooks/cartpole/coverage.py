@@ -3,6 +3,7 @@ import torch
 import pickle
 import numpy as np
 import gymnasium as gym
+import matplotlib.pyplot as plt
 
 from tqdm import tqdm
 from typing import Callable, Any
@@ -132,7 +133,7 @@ for ix, calib_set in results[0]["calib_sets"].items():
         visits.append(visited)
 
 # %%
-import matplotlib.pyplot as plt
+
 
 coverages = np.array(coverages)
 visits = np.array(visits)
