@@ -88,17 +88,17 @@ def compute_lower_bounds(calib_sets: dict, alpha: float, min_calib: int):
     n_calibs = []
     qhat_global = 0
 
-    for sa, reg in calib_sets.items():
-        n_calib = len(reg["y_preds"])
+    for sa, regressor in calib_sets.items():
+        n_calib = len(regressor["y_preds"])
         n_calibs.append(n_calib)
         if n_calib < min_calib:
             continue
 
         # conformalise
         q_level = min(1.0, np.ceil((n_calib + 1) * (1 - alpha)) / n_calib)
-        qhat = np.quantile(reg["scores"], q_level, method="higher")
+        qhat = np.quantile(regressor["scores"], q_level, method="higher")
 
-        reg["qhat"] = qhat
+        regressor["qhat"] = qhat
         # Set a global, pessimistic correction for un-visited state action pairs.
         if qhat > qhat_global:
             qhat_global = qhat

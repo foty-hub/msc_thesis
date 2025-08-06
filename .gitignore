@@ -22,3 +22,4 @@ wandb/
 # Ignore CartPole experimental results
 results/cartpole/*/*.png
 results/cartpole/*/*.pkl
+models/

@@ -49,12 +49,14 @@ def learn_dqn_policy(
 
     # Load cached model if available and not training from scratch
     if not train_from_scratch and os.path.exists(model_path + ".zip"):
+        print(f"Loading model: {seed}")
         model = DQN.load(model_path)
         # Attach a fresh environment so the model is usable immediately
         env = gym.make("CartPole-v1", render_mode="rgb_array")
         model.set_env(env)
     else:
         # Train a new model from scratch
+        print(f"Learning from scratch: {seed}")
         model = instantiate_vanilla_dqn(seed, discount)
         model.learn(total_timesteps=total_timesteps, progress_bar=True)
         model.save(model_path)

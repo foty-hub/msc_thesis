@@ -194,5 +194,4 @@ def main():
 
 if __name__ == "__main__":
     all_results = main()
-    # print(f"On average, CP is {np.mean(mean_conf / mean_no):.2f}x better")
 # %%
