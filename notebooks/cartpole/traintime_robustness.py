@@ -4,14 +4,11 @@ import numpy as np
 import gymnasium as gym
 
 from tqdm import tqdm
-from typing import Any
+from typing import Any, Callable
+from stable_baselines3 import DQN
 
 from crl.cons.calib import compute_lower_bounds, collect_transitions, fill_calib_sets
-from crl.cons.cartpole import (
-    instantiate_vanilla_dqn,
-    instantiate_eval_env,
-    learn_policy,
-)
+from crl.cons.cartpole import instantiate_eval_env, learn_dqn_policy
 from crl.cons.discretise import build_tiling
 
 # fmt: off
@@ -25,8 +22,8 @@ NUM_EVAL_EPISODES=250
 
 
 def run_eval(
-    model,
-    discretise,
+    model: DQN,
+    discretise: Callable,
     num_eps: int,
     conformalise: bool,
     ep_env: gym.Env,
@@ -98,8 +95,11 @@ def run_shift_experiment(
 
 def run_single_seed_experiment(seed: int):
     # train the nominal policy
-    model = instantiate_vanilla_dqn(seed=seed, discount=_DISCOUNT)
-    model, vec_env = learn_policy(model=model, total_timesteps=50_000)
+    model, vec_env = learn_dqn_policy(
+        seed=seed,
+        discount=_DISCOUNT,
+        total_timesteps=50_000,
+    )
     # discretise the space and collect observations for the calibration sets
     discretise, n_discrete_states = build_tiling(model, vec_env, state_bins=STATE_BINS)
     buffer = collect_transitions(model, vec_env, n_transitions=500_000)

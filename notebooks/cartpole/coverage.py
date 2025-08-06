@@ -9,17 +9,13 @@ from tqdm import tqdm
 from typing import Callable, Any
 from stable_baselines3 import DQN
 
-from traintime_robustness import (
-    learn_policy,
-    build_tiling,
-    collect_transitions,
-    fill_calib_sets,
-    compute_lower_bounds,
-)
+from crl.cons.calib import compute_lower_bounds, collect_transitions, fill_calib_sets
+from crl.cons.cartpole import learn_dqn_policy
+from crl.cons.discretise import build_tiling
 
 DISCOUNT = 0.99
 ALPHA = 0.1
-NUM_EXPERIMENTS = 1
+NUM_EXPERIMENTS = 25
 
 
 def measure_coverage(
@@ -79,11 +75,15 @@ def measure_coverage(
     return covered / n_transitions
 
 
-def run_single_seed_experiment(seed: int):
+def run_single_seed_experiment(seed: int) -> dict[str, Any]:
     """
     Runs a single experiment for a given seed.
     """
-    model, vec_env = learn_policy(seed=seed, discount=DISCOUNT)
+    model, vec_env = learn_dqn_policy(
+        seed=seed,
+        discount=DISCOUNT,
+        total_timesteps=50_000,
+    )
     discretise, n_discrete_states = build_tiling(model, vec_env)
     buffer = collect_transitions(model, vec_env, n_transitions=10_000)
     calib_sets = fill_calib_sets(model, buffer, discretise, n_discrete_states)
