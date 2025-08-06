@@ -1,11 +1,11 @@
 # %%
 import torch
+import pickle
 import numpy as np
 import gymnasium as gym
-import pickle
 
-from typing import Callable, Any
 from tqdm import tqdm
+from typing import Callable, Any
 from stable_baselines3 import DQN
 
 from traintime_robustness import (
@@ -138,11 +138,9 @@ coverages = np.array(coverages)
 visits = np.array(visits)
 
 plt.hist(coverages, bins=100)
-plt.axvline(0.9, linestyle="--", c="k")
-
+plt.axvline(1 - ALPHA, linestyle="--", c="k")
+plt.text(1 - ALPHA + 0.005, y=140, s=r"$1-\alpha$")
 # %%
 # visit weighted coverage
 print((coverages * visits).sum() / visits.sum())
-# %%
-coverages
 # %%
