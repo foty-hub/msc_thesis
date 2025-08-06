@@ -1,6 +1,7 @@
 import gymnasium as gym
 from stable_baselines3 import A2C, DQN
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
+import os
 
 
 def instantiate_vanilla_dqn(seed: int = 0, discount: float = 0.99) -> DQN:
@@ -35,10 +36,29 @@ def instantiate_eval_env(length, masscart):
     return eval_vec_env
 
 
-def learn_policy(
-    model: DQN,
+def learn_dqn_policy(
+    seed: int = 0,
+    discount: float = 0.99,
     total_timesteps: int = 50_000,
+    model_dir: str = "models/cartpole/dqn",
+    train_from_scratch: bool = False,
 ) -> tuple[DQN, VecEnv]:
-    model.learn(total_timesteps=total_timesteps, progress_bar=True)
-    vec_env = model.get_env()
+    # Path for caching the trained model
+    os.makedirs(model_dir, exist_ok=True)
+    model_path = os.path.join(model_dir, f"model_{seed}")
+
+    # Load cached model if available and not training from scratch
+    if not train_from_scratch and os.path.exists(model_path + ".zip"):
+        model = DQN.load(model_path)
+        # Attach a fresh environment so the model is usable immediately
+        env = gym.make("CartPole-v1", render_mode="rgb_array")
+        model.set_env(env)
+    else:
+        # Train a new model from scratch
+        model = instantiate_vanilla_dqn(seed, discount)
+        model.learn(total_timesteps=total_timesteps, progress_bar=True)
+        model.save(model_path)
+
+    # Retrieve the vectorised environment
+    vec_env = model.get_env() if model.get_env() is not None else model.env
     return model, vec_env
