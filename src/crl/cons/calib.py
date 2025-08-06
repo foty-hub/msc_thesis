@@ -1,7 +1,6 @@
 # %%
 import torch
 import numpy as np
-import gymnasium as gym
 
 from collections import deque
 from typing import Callable
