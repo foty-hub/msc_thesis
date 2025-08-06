@@ -1,6 +1,58 @@
 import numpy as np
 from typing import Sequence, Callable
-from buffer import Transition
+from crl.cons.buffer import Transition
+from stable_baselines3 import DQN
+from stable_baselines3.common.vec_env.base_vec_env import VecEnv
+
+
+def run_test_episodes(model: DQN, vec_env: VecEnv):
+    stats = [
+        {"label": "position", "vals": []},
+        {"label": "velocity", "vals": []},
+        {"label": "angle", "vals": []},
+        {"label": "angular_velocity", "vals": []},
+    ]
+    for episode in range(50):
+        obs = vec_env.reset()
+        for _id in range(4):
+            stats[_id]["vals"].append(obs[0, _id])
+
+        for t in range(500):
+            action, _states = model.predict(obs, deterministic=True)
+            obs, reward, done, info = vec_env.step(action)
+            for _id in range(4):
+                stats[_id]["vals"].append(obs[0, _id])
+            if done:
+                break
+
+    return stats
+
+
+def build_tiling(model: DQN, vec_env: VecEnv, state_bins: list[int]):
+    stats = run_test_episodes(model, vec_env)
+
+    # compute mins and maxes of the tiling according to the quantiles of the distribution
+    maxs, mins = compute_bin_ranges(stats, obs_quantile=0.1, state_bins=state_bins)
+    discretise, n_discrete_states = build_grid_tiling(mins, maxs, state_bins=state_bins)
+    return discretise, n_discrete_states
+
+
+def compute_bin_ranges(
+    stats: list[dict[str, str | list]],
+    state_bins: list[int],
+    obs_quantile: float = 0.1,
+) -> tuple[np.ndarray, np.ndarray]:
+    D = len(state_bins)  # dimensionality of the state space
+    maxs = np.zeros(D)
+    mins = np.zeros(D)
+    for dim in range(D):
+        vals = stats[dim]["vals"]
+        mins[dim], maxs[dim] = (
+            np.quantile(vals, obs_quantile),
+            np.quantile(vals, 1 - obs_quantile),
+        )
+
+    return maxs, mins
 
 
 # Grid Tiling
@@ -59,7 +111,7 @@ def get_unique_ids(binned_data, num_bins):
 def build_grid_tiling(
     mins: np.ndarray,
     maxs: np.ndarray,
-    num_bins: np.ndarray,
+    state_bins: list[int],
 ) -> tuple[Callable[[np.ndarray, np.ndarray], int | np.ndarray], int]:
     """
     Fixed-width grid discretisation over (state, action).
@@ -82,6 +134,7 @@ def build_grid_tiling(
 
     # state_ids = discretise_observation_grid(states, mins, maxs, num_bins)
     # ids = (state_ids * n_actions + actions).tolist()
+    num_bins = np.array(state_bins)
     n_actions = 2
 
     n_states = int(np.prod(num_bins)) * n_actions
