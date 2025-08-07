@@ -7,7 +7,12 @@ from tqdm import tqdm
 from typing import Any, Callable
 from stable_baselines3 import DQN
 
-from crl.cons.calib import compute_lower_bounds, collect_transitions, fill_calib_sets
+from crl.cons.calib import (
+    compute_lower_bounds,
+    collect_transitions,
+    fill_calib_sets,
+    unsigned_score,
+)
 from crl.cons.cartpole import instantiate_eval_env, learn_dqn_policy
 from crl.cons.discretise import build_tiling
 
@@ -102,13 +107,14 @@ def run_single_seed_experiment(seed: int):
     )
     # discretise the space and collect observations for the calibration sets
     discretise, n_discrete_states = build_tiling(model, vec_env, state_bins=STATE_BINS)
-    buffer = collect_transitions(model, vec_env, n_transitions=500_000)
+    buffer = collect_transitions(model, vec_env, n_transitions=100_000)
     calib_sets = fill_calib_sets(
         model,
         buffer,
         discretise,
         n_discrete_states,
         discount=_DISCOUNT,
+        score=unsigned_score,
     )
     calib_sets, n_calibs = compute_lower_bounds(
         calib_sets,
