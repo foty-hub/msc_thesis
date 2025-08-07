@@ -36,10 +36,15 @@ def collect_transitions(
     return buffer
 
 
-# 1. build up a conformal set and conformalise calib_sets for each state-action pair (essentially measuring Bellman errors)
-def score(y_pred, y_true):
-    "Note that this is the signed error, *not* the absolute error as is typical. This only penalises overestimation"
+def signed_score(y_pred, y_true) -> np.ndarray:
+    """Signed error e=y_pred - y_true.
+    Note that this is the signed error, *not* the absolute error as is typical - to penalise overestimation"""
     return np.asarray(y_pred) - np.asarray(y_true)
+
+
+def unsigned_score(y_pred, y_true) -> np.ndarray:
+    "Unsigned variant of the score e=|y_pred - y_true|"
+    return np.abs(signed_score(y_pred, y_true))
 
 
 def fill_calib_sets(
@@ -49,6 +54,7 @@ def fill_calib_sets(
     n_discrete_states: int,
     discount: float,
     maxlen: int = 500,
+    score: Callable = signed_score,
 ):
     calib_sets = {}
     for (sa,) in np.ndindex((n_discrete_states)):
@@ -105,3 +111,6 @@ def compute_lower_bounds(calib_sets: dict, alpha: float, min_calib: int):
 
     calib_sets["fallback"] = qhat_global
     return calib_sets, n_calibs
+
+
+# %%

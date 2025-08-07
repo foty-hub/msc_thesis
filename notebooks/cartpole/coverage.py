@@ -5,17 +5,20 @@ import numpy as np
 import gymnasium as gym
 import matplotlib.pyplot as plt
 
+from copy import deepcopy
 from tqdm import tqdm
 from typing import Callable, Any
 from stable_baselines3 import DQN
 
 from crl.cons.calib import compute_lower_bounds, collect_transitions, fill_calib_sets
-from crl.cons.cartpole import learn_dqn_policy
+from crl.cons.cartpole import learn_dqn_policy, instantiate_eval_env
 from crl.cons.discretise import build_tiling
 
 DISCOUNT = 0.99
 ALPHA = 0.1
 NUM_EXPERIMENTS = 25
+STATE_BINS = [6, 6, 6, 6]
+MIN_CALIB = 50
 
 
 def measure_coverage(
@@ -24,14 +27,15 @@ def measure_coverage(
     discretise: Callable,
     calib_sets: dict[dict[str, Any]],
     n_transitions: int = 100_000,
-):
+) -> tuple[float, dict[dict[str, Any], Any]]:
     """
     Measures the coverage of the conformal prediction intervals.
     """
+    calib_sets = deepcopy(calib_sets)
     obs = vec_env.reset()
     covered = 0
 
-    for _ in tqdm(range(n_transitions), desc="Measuring coverage"):
+    for _ in tqdm(range(n_transitions), desc="Measuring coverage", leave=False):
         # Get predicted Q-values and action
         with torch.no_grad():
             q_vals = model.q_net(model.policy.obs_to_tensor(obs)[0]).flatten()
@@ -41,7 +45,7 @@ def measure_coverage(
 
         # Discretise state-action pair to get the calibration set
         obs_disc = discretise(obs, action)
-        qhat = calib_sets[obs_disc].get("qhat", calib_sets["fallback"])
+        qhat = 1000 * max(0.0, calib_sets[obs_disc].get("qhat", calib_sets["fallback"]))
         calib_sets[obs_disc]["visits"] = calib_sets[obs_disc].get("visits", 0) + 1
 
         # Calculate the lower bound of the prediction interval
@@ -56,7 +60,7 @@ def measure_coverage(
             y_true = reward
         else:
             with torch.no_grad():
-                next_q_vals = model.q_net(
+                next_q_vals = model.q_net_target(
                     model.policy.obs_to_tensor(next_obs)[0]
                 ).flatten()
             next_action, _ = model.predict(next_obs, deterministic=True)
@@ -72,7 +76,9 @@ def measure_coverage(
         if done:
             obs = vec_env.reset()
 
-    return covered / n_transitions
+    coverage_rate = covered / n_transitions
+
+    return coverage_rate, calib_sets
 
 
 def run_single_seed_experiment(seed: int) -> dict[str, Any]:
@@ -84,13 +90,20 @@ def run_single_seed_experiment(seed: int) -> dict[str, Any]:
         discount=DISCOUNT,
         total_timesteps=50_000,
     )
-    discretise, n_discrete_states = build_tiling(model, vec_env)
-    buffer = collect_transitions(model, vec_env, n_transitions=10_000)
-    calib_sets = fill_calib_sets(model, buffer, discretise, n_discrete_states)
-    calib_sets, _ = compute_lower_bounds(calib_sets)
+    discretise, n_discrete_states = build_tiling(model, vec_env, state_bins=STATE_BINS)
+    buffer = collect_transitions(model, vec_env, n_transitions=100_000)
+    calib_sets = fill_calib_sets(
+        model, buffer, discretise, n_discrete_states, discount=DISCOUNT
+    )
+    calib_sets, _ = compute_lower_bounds(calib_sets, alpha=0.1, min_calib=MIN_CALIB)
 
-    coverage = measure_coverage(vec_env, model, discretise, calib_sets)
+    coverage, calib_sets = measure_coverage(vec_env, model, discretise, calib_sets)
     print(f"Seed {seed}: Coverage = {coverage:.4f} (target: {1 - ALPHA})")
+
+    for length in np.linspace(0.1, 2.0, 20):
+        eval_env = instantiate_eval_env(length=length, masscart=1.0, seed=seed)
+        shifted_coverage, _ = measure_coverage(eval_env, model, discretise, calib_sets)
+        print(f" Length {length}: Coverage = {shifted_coverage:.4f}")
     return {"seed": seed, "coverage": coverage, "calib_sets": calib_sets}
 
 
