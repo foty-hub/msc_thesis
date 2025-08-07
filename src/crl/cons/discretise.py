@@ -148,9 +148,9 @@ def build_grid_tiling(
         out = state_batch * n_actions + act_arr
         return out.item() if out.size == 1 else out
 
-    print(
-        f"Grid tiling: {n_states:,} states ({np.prod(num_bins)} states x {n_actions} actions)"
-    )
+    # print(
+    #     f"Grid tiling: {n_states:,} states ({np.prod(num_bins)} states x {n_actions} actions)"
+    # )
     return discretise, n_states
 
 

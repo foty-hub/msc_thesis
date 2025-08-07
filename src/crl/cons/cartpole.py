@@ -27,9 +27,26 @@ def instantiate_vanilla_dqn(seed: int = 0, discount: float = 0.99) -> DQN:
     return model
 
 
-def instantiate_eval_env(length, masscart):
+def instantiate_eval_env(length: float, masscart: float, seed: int | None = None):
+    """
+    Instantiate a CartPole evaluation environment with custom pole length and cart mass.
+
+    Parameters
+    ----------
+    length : float
+        Pole length (default 0.5 m).
+    masscart : float
+        Cart mass (default 1.0 kg).
+    seed : int | None
+        Random seed for reproducibility. If ``None`` the environment is left unseeded.
+    """
     # attrs = ['gravity', 'force_mag', 'masscart', 'masspole', 'length', 'polemass_length']
     eval_env = gym.make("CartPole-v1")
+    if seed is not None:
+        # Seed the environment and its spaces for deterministic roll‑outs
+        eval_env.reset(seed=seed)
+        eval_env.action_space.seed(seed)
+        eval_env.observation_space.seed(seed)
     eval_env.unwrapped.masscart = masscart  # default 1.0
     eval_env.unwrapped.length = length  # default 0.5
     eval_vec_env = DQN("MlpPolicy", env=eval_env).get_env()
