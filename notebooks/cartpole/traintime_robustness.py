@@ -60,15 +60,15 @@ def run_eval(
 
 
 def run_shift_experiment(
-    model,
-    calib_sets,
-    discretise,
-    length: float = 0.5,
-    masscart: float = 1.0,
+    model: DQN,
+    calib_sets: dict,
+    discretise: Callable,
+    env_name: str,
+    shift_params: dict,
     num_eps: int = NUM_EVAL_EPISODES,
 ):
     # instantiate the shifted env
-    eval_vec_env = instantiate_eval_env(length, masscart)
+    eval_vec_env = instantiate_eval_env(env_name=env_name, **shift_params)
 
     # run an experiment with and without the CP lower-bound correction
     returns_conf = run_eval(
@@ -89,18 +89,18 @@ def run_shift_experiment(
     )
 
     exp_result = {
-        "length": length,
-        "masscart": masscart,
         "returns_conf": returns_conf,
         "returns_noconf": returns_noconf,
         "num_episodes": num_eps,
     }
+    exp_result.update(shift_params)
     return exp_result
 
 
-def run_single_seed_experiment(seed: int):
+def run_single_seed_experiment(env_name: str, seed: int):
     # train the nominal policy
     model, vec_env = learn_dqn_policy(
+        env_name=env_name,
         seed=seed,
         discount=_DISCOUNT,
         total_timesteps=50_000,
@@ -124,14 +124,30 @@ def run_single_seed_experiment(seed: int):
 
     # Test agent on shifted environments
     results = []
-    for length in (pbar := tqdm(np.linspace(0.1, 2.0, 20))):
-        pbar.set_description(f"l={length:.1f}")
+
+    EVAL_PARAMETERS = {
+        # CartPole: vary pole length as before
+        "CartPole-v1": ("length", np.linspace(0.1, 2.0, 20)),
+        # Acrobot: vary link 1 length (0.5x–2.0x of default 1.0)
+        "Acrobot-v1": ("link_length_1", np.linspace(0.5, 2.0, 20)),
+        # MountainCar: vary gravity around default 0.0025
+        "MountainCar-v0": ("gravity", np.linspace(0.0015, 0.0040, 20)),
+        # Pendulum: vary gravity g around default 10
+        "Pendulum-v1": ("g", np.linspace(5.0, 15.0, 20)),
+    }
+
+    param, param_values = EVAL_PARAMETERS[env_name]
+
+    for param_val in (pbar := tqdm(param_values)):
+        pbar.set_description(f"{param}={param_val:.1f}")
+        eval_parameters = {param: param_val}
         results.append(
             run_shift_experiment(
                 model,
                 calib_sets,
                 discretise,
-                length=length,
+                shift_params=eval_parameters,
+                env_name=env_name,
                 num_eps=NUM_EVAL_EPISODES,
             )
         )
@@ -142,7 +158,14 @@ def run_single_seed_experiment(seed: int):
 def plot_single_experiment(seed: int, results: list[dict]):
     conf_returns = np.array([res["returns_conf"] for res in results])
     noconf_returns = np.array([res["returns_noconf"] for res in results])
-    lengths = np.array([res["length"] for res in results])
+    # Determine which shift parameter was swept (the key that's not a return/stat field)
+    _ignore_keys = {"returns_conf", "returns_noconf", "num_episodes"}
+    shift_keys = [k for k in results[0].keys() if k not in _ignore_keys]
+    assert len(shift_keys) == 1, (
+        f"Expected a single shift parameter, found: {shift_keys}"
+    )
+    x_key = shift_keys[0]
+    xvals = np.array([res[x_key] for res in results])
     import matplotlib.pyplot as plt
     from crl.utils.graphing import despine
 
@@ -150,7 +173,7 @@ def plot_single_experiment(seed: int, results: list[dict]):
     mean_conf = conf_returns.mean(axis=1)
     se_conf = conf_returns.std(axis=1) / np.sqrt(250)
     plt.errorbar(
-        lengths,
+        xvals,
         mean_conf,
         yerr=se_conf,
         marker="o",
@@ -163,7 +186,7 @@ def plot_single_experiment(seed: int, results: list[dict]):
     mean_no = noconf_returns.mean(axis=1)
     se_no = noconf_returns.std(axis=1) / np.sqrt(250)
     plt.errorbar(
-        lengths,
+        xvals,
         mean_no,
         yerr=se_no,
         marker="o",
@@ -173,9 +196,10 @@ def plot_single_experiment(seed: int, results: list[dict]):
     )
 
     plt.ylabel("Episodic Return")
-    plt.xlabel("Pole Length")
-    plt.axvline(0.5, linestyle="--", c="k", alpha=0.5)
-    plt.xlim(0, 2.0)
+    plt.xlabel(x_key)
+    if x_key == "length":
+        plt.axvline(0.5, linestyle="--", c="k", alpha=0.5)
+        plt.xlim(0, 2.0)
     plt.ylim(0, None)
     despine(plt.gca())
     plt.grid(True, linestyle="--", alpha=0.5)
@@ -187,9 +211,10 @@ def plot_single_experiment(seed: int, results: list[dict]):
 # %%
 def main():
     all_results = []
+    env_name = "CartPole-v1"
 
     for seed in range(NUM_EXPERIMENTS):
-        single_exp_result = run_single_seed_experiment(seed=seed)
+        single_exp_result = run_single_seed_experiment(env_name=env_name, seed=seed)
         plot_single_experiment(seed, single_exp_result)
         all_results.append({"seed": seed, "results": single_exp_result})
         with open("robustness_experiment.pkl", "wb") as f:
