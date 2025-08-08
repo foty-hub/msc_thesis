@@ -20,6 +20,10 @@ NUM_EXPERIMENTS = 25
 STATE_BINS = [6, 6, 6, 6]
 MIN_CALIB = 50
 
+# from plot.ipynb - filters out seeds where the
+# agent gets less than 490 reward on the nominal env.
+GOOD_SEEDS = [1, 3, 5, 6, 7, 9, 12, 14, 15, 17, 21, 22]
+
 
 def measure_coverage(
     vec_env: gym.Env,
@@ -45,7 +49,7 @@ def measure_coverage(
 
         # Discretise state-action pair to get the calibration set
         obs_disc = discretise(obs, action)
-        qhat = 1000 * max(0.0, calib_sets[obs_disc].get("qhat", calib_sets["fallback"]))
+        qhat = calib_sets[obs_disc].get("qhat", calib_sets["fallback"])
         calib_sets[obs_disc]["visits"] = calib_sets[obs_disc].get("visits", 0) + 1
 
         # Calculate the lower bound of the prediction interval
@@ -60,7 +64,7 @@ def measure_coverage(
             y_true = reward
         else:
             with torch.no_grad():
-                next_q_vals = model.q_net_target(
+                next_q_vals = model.q_net(
                     model.policy.obs_to_tensor(next_obs)[0]
                 ).flatten()
             next_action, _ = model.predict(next_obs, deterministic=True)
@@ -100,11 +104,20 @@ def run_single_seed_experiment(seed: int) -> dict[str, Any]:
     coverage, calib_sets = measure_coverage(vec_env, model, discretise, calib_sets)
     print(f"Seed {seed}: Coverage = {coverage:.4f} (target: {1 - ALPHA})")
 
+    shifted_coverages = []
     for length in np.linspace(0.1, 2.0, 20):
         eval_env = instantiate_eval_env(length=length, masscart=1.0, seed=seed)
-        shifted_coverage, _ = measure_coverage(eval_env, model, discretise, calib_sets)
-        print(f" Length {length}: Coverage = {shifted_coverage:.4f}")
-    return {"seed": seed, "coverage": coverage, "calib_sets": calib_sets}
+        shifted_coverage, _ = measure_coverage(
+            eval_env, model, discretise, calib_sets, n_transitions=50_000
+        )
+        shifted_coverages.append(shifted_coverage)
+        print(f" Length {length:.1f}: Coverage = {shifted_coverage:.4f}")
+    return {
+        "seed": seed,
+        "coverage": coverage,
+        "calib_sets": calib_sets,
+        "shifted_coverage": shifted_coverages,
+    }
 
 
 # %%
@@ -113,7 +126,7 @@ def main():
     Main function to run experiments for multiple seeds.
     """
     all_results = []
-    for seed in range(NUM_EXPERIMENTS):
+    for seed in GOOD_SEEDS:
         result = run_single_seed_experiment(seed=seed)
         all_results.append(result)
         with open("coverage_experiment.pkl", "wb") as f:
@@ -130,7 +143,7 @@ if __name__ == "__main__":
 # %%
 coverages = []
 visits = []
-for ix, calib_set in results[0]["calib_sets"].items():
+for ix, calib_set in results[1]["calib_sets"].items():
     try:
         visited = calib_set.get("covered", False)
     except AttributeError:
@@ -145,15 +158,14 @@ for ix, calib_set in results[0]["calib_sets"].items():
         coverages.append(coverage)
         visits.append(visited)
 
-# %%
-
-
 coverages = np.array(coverages)
 visits = np.array(visits)
 
 plt.hist(coverages, bins=100)
 plt.axvline(1 - ALPHA, linestyle="--", c="k")
 plt.text(1 - ALPHA + 0.005, y=140, s=r"$1-\alpha$")
+plt.xlim(0.5, 1.05)
+plt.title("Histogram of coverage rates, by state-action bin")
 # %%
 # visit weighted coverage
 print((coverages * visits).sum() / visits.sum())
