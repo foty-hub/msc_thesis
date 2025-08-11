@@ -4,7 +4,7 @@ import numpy as np
 
 from collections import deque
 from typing import Callable
-from stable_baselines3 import A2C, DQN
+from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
 from crl.cons.buffer import ReplayBuffer
@@ -111,6 +111,3 @@ def compute_lower_bounds(calib_sets: dict, alpha: float, min_calib: int):
 
     calib_sets["fallback"] = qhat_global
     return calib_sets, n_calibs
-
-
-# %%

@@ -2,28 +2,42 @@ import numpy as np
 from typing import Sequence, Callable
 from crl.cons.buffer import Transition
 from stable_baselines3 import DQN
+
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
+# Classic Control obs spaces are Boxes in Gymnasium/Gym
+from gymnasium.spaces import Box  # type: ignore
 
-def run_test_episodes(model: DQN, vec_env: VecEnv):
-    stats = [
-        {"label": "position", "vals": []},
-        {"label": "velocity", "vals": []},
-        {"label": "angle", "vals": []},
-        {"label": "angular_velocity", "vals": []},
-    ]
-    for episode in range(50):
-        obs = vec_env.reset()
-        for _id in range(4):
-            stats[_id]["vals"].append(obs[0, _id])
 
-        for t in range(500):
+def run_test_episodes(model: DQN, vec_env: VecEnv, n_episodes: int = 50):
+    """
+    Run `n_episodes` using a vectorized env (n_envs == 1) and collect per-dimension
+    observation traces. Works for generic Classic Control tasks that expose a
+    1-D Box observation space.
+    """
+    obs_space = vec_env.observation_space
+    n_dims = int(obs_space.shape[0])
+    # Sanity checks
+    assert getattr(vec_env, "num_envs", 1) == 1
+    assert isinstance(obs_space, Box)
+
+    # Generic, index-based labels
+    stats = [{"label": f"dim_{i}", "vals": []} for i in range(n_dims)]
+
+    for _ in range(n_episodes):
+        obs = vec_env.reset()  # shape (1, n_dims)
+
+        # Record initial observation at reset
+        for i in range(n_dims):
+            stats[i]["vals"].append(float(obs[0, i]))
+
+        # Step until episode ends (terminated or truncated)
+        dones = np.array([False], dtype=bool)
+        while not bool(dones[0]):
             action, _states = model.predict(obs, deterministic=True)
-            obs, reward, done, info = vec_env.step(action)
-            for _id in range(4):
-                stats[_id]["vals"].append(obs[0, _id])
-            if done:
-                break
+            obs, rewards, dones, infos = vec_env.step(action)
+            for i in range(n_dims):
+                stats[i]["vals"].append(float(obs[0, i]))
 
     return stats
 
@@ -33,7 +47,13 @@ def build_tiling(model: DQN, vec_env: VecEnv, state_bins: list[int]):
 
     # compute mins and maxes of the tiling according to the quantiles of the distribution
     maxs, mins = compute_bin_ranges(stats, obs_quantile=0.1, state_bins=state_bins)
-    discretise, n_discrete_states = build_grid_tiling(mins, maxs, state_bins=state_bins)
+    n_actions = vec_env.action_space.n
+    discretise, n_discrete_states = build_grid_tiling(
+        mins,
+        maxs,
+        state_bins=state_bins,
+        n_actions=n_actions,
+    )
     return discretise, n_discrete_states
 
 
@@ -112,6 +132,7 @@ def build_grid_tiling(
     mins: np.ndarray,
     maxs: np.ndarray,
     state_bins: list[int],
+    n_actions: int,
 ) -> tuple[Callable[[np.ndarray, np.ndarray], int | np.ndarray], int]:
     """
     Fixed-width grid discretisation over (state, action).
@@ -135,22 +156,19 @@ def build_grid_tiling(
     # state_ids = discretise_observation_grid(states, mins, maxs, num_bins)
     # ids = (state_ids * n_actions + actions).tolist()
     num_bins = np.array(state_bins)
-    n_actions = 2
-
     n_states = int(np.prod(num_bins)) * n_actions
 
     # ---------------- lookup for arbitrary (obs, act)
     def discretise(obs: np.ndarray, act: np.ndarray | int) -> int | np.ndarray:
-        obs_arr = np.asarray(obs, float).reshape(-1, 4)  # ensure (batch,4)
+        obs_arr = np.asarray(obs, float).reshape(
+            -1, len(state_bins)
+        )  # ensure (batch,4)
         act_arr = np.asarray(act, int).reshape(-1)  # ensure (batch,)
 
         state_batch = discretise_observation_grid(obs_arr, mins, maxs, num_bins)
         out = state_batch * n_actions + act_arr
         return out.item() if out.size == 1 else out
 
-    # print(
-    #     f"Grid tiling: {n_states:,} states ({np.prod(num_bins)} states x {n_actions} actions)"
-    # )
     return discretise, n_states
 
 
