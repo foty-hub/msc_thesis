@@ -14,7 +14,7 @@ from crl.cons.calib import (
     compute_lower_bounds,
     collect_transitions,
     fill_calib_sets,
-    unsigned_score,
+    signed_score,
 )
 from crl.cons.cartpole import instantiate_eval_env, learn_dqn_policy
 from crl.cons.discretise import build_tiling, build_tile_coding
@@ -25,7 +25,7 @@ ALPHA = 0.1                 # Conformal prediction miscoverage level
 MIN_CALIB = 50              # Minimum threshold for a calibration set to be leveraged
 NUM_EXPERIMENTS = 25
 NUM_EVAL_EPISODES=250
-N_CALIB_TRANSITIONS=50_000
+N_CALIB_TRANSITIONS=100_000
 
 @dataclass
 class ExperimentParams:
@@ -50,7 +50,7 @@ EVAL_PARAMETERS = {
     # CartPole: vary pole length as before
     "CartPole-v1": ("length", np.linspace(0.1, 2.0, 20), [6] * 4),
     # Acrobot: vary link 1 length (0.5x–2.0x of default 1.0)
-    "Acrobot-v1": ("LINK_LENGTH_1", np.linspace(0.5, 2.0, 16), [4] * 6),
+    "Acrobot-v1": ("LINK_LENGTH_1", np.linspace(0.5, 2.0, 16), [6] * 6),
     # "Acrobot-v1": ("LINK_MASS_1", np.linspace(0.5, 2.0, 16), [4] * 6),
     # MountainCar: vary gravity around default 0.0025
     "MountainCar-v0": ("gravity", np.linspace(0.0015, 0.0040, 21), [6] * 2),
@@ -146,8 +146,10 @@ def run_single_seed_experiment(env_name: str, seed: int):
     )
     # discretise the space and collect observations for the calibration sets
     param, param_values, state_bins = EVAL_PARAMETERS[env_name]
-    discretise, n_discrete_states = build_tiling(model, vec_env, state_bins=state_bins)
-    # discretise, n_discrete_states = build
+    # discretise, n_discrete_states = build_tiling(model, vec_env, state_bins=state_bins)
+    discretise, n_discrete_states = build_tile_coding(
+        model, vec_env, tiles=state_bins[0], tilings=1
+    )
     buffer = collect_transitions(model, vec_env, n_transitions=N_CALIB_TRANSITIONS)
     calib_sets = fill_calib_sets(
         model,
@@ -155,7 +157,7 @@ def run_single_seed_experiment(env_name: str, seed: int):
         discretise,
         n_discrete_states,
         discount=_DISCOUNT,
-        score=unsigned_score,
+        score=signed_score,
     )
     calib_sets, n_calibs = compute_lower_bounds(
         calib_sets,
