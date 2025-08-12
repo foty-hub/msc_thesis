@@ -17,7 +17,7 @@ from crl.cons.calib import (
     unsigned_score,
 )
 from crl.cons.cartpole import instantiate_eval_env, learn_dqn_policy
-from crl.cons.discretise import build_tiling
+from crl.cons.discretise import build_tiling, build_tile_coding
 
 # fmt: off
 _DISCOUNT = 0.99            # Gamma/discount factor for the DQN
@@ -25,6 +25,8 @@ ALPHA = 0.1                 # Conformal prediction miscoverage level
 MIN_CALIB = 50              # Minimum threshold for a calibration set to be leveraged
 NUM_EXPERIMENTS = 25
 NUM_EVAL_EPISODES=250
+N_CALIB_TRANSITIONS=50_000
+
 @dataclass
 class ExperimentParams:
     env_name: str
@@ -32,11 +34,14 @@ class ExperimentParams:
     param_vals: Sequence
     state_bins: list[int]
     nominal_value: float
+    success_threshold: int = 0
+    good_seeds: list[int] | None = None
 
 
 EXPERIMENTS = [
     ExperimentParams("CartPole-v1", "length", np.linspace(0.1, 2.0, 20), [6] * 4, 0.5),
-    ExperimentParams("Acrobot-v1", "LINK_LENGTH_1", np.linspace(0.5, 2.0, 16), [4] * 6, 1.0),
+    ExperimentParams("Acrobot-v1", "LINK_LENGTH_1", np.linspace(0.5, 2.0, 16), [6] * 6, 1.0),
+    # ExperimentParams("Acrobot-v1", "LINK_MASS_2", np.linspace(0.5, 2.0, 16), [4] * 6, 1.0),
     ExperimentParams("MountainCar-v0", "gravity", np.linspace(0.0015, 0.0040, 21), [6] * 2, 9.8)
 ]
 # fmt: on
@@ -46,6 +51,7 @@ EVAL_PARAMETERS = {
     "CartPole-v1": ("length", np.linspace(0.1, 2.0, 20), [6] * 4),
     # Acrobot: vary link 1 length (0.5x–2.0x of default 1.0)
     "Acrobot-v1": ("LINK_LENGTH_1", np.linspace(0.5, 2.0, 16), [4] * 6),
+    # "Acrobot-v1": ("LINK_MASS_1", np.linspace(0.5, 2.0, 16), [4] * 6),
     # MountainCar: vary gravity around default 0.0025
     "MountainCar-v0": ("gravity", np.linspace(0.0015, 0.0040, 21), [6] * 2),
 }
@@ -141,7 +147,8 @@ def run_single_seed_experiment(env_name: str, seed: int):
     # discretise the space and collect observations for the calibration sets
     param, param_values, state_bins = EVAL_PARAMETERS[env_name]
     discretise, n_discrete_states = build_tiling(model, vec_env, state_bins=state_bins)
-    buffer = collect_transitions(model, vec_env, n_transitions=100_000)
+    # discretise, n_discrete_states = build
+    buffer = collect_transitions(model, vec_env, n_transitions=N_CALIB_TRANSITIONS)
     calib_sets = fill_calib_sets(
         model,
         buffer,
