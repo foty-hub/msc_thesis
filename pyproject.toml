@@ -18,6 +18,7 @@ dependencies = [
     "opencv-python>=4.12.0.88",
     "optax>=0.2.4",
     "pandas>=2.3.0",
+    "pyfixedreps-andnp==4.1.2",
     "pygame>=2.6.1",
     "pytest>=8.4.1",
     "rliable>=1.2.0",
