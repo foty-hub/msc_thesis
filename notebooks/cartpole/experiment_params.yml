@@ -21,7 +21,7 @@ Acrobot-v1-LINK_LENGTH_1:
 MountainCar-v0-gravity:
   env: MountainCar-v0
   parameter: gravity
-  nominal_value: 9.8
+  nominal_value: 0.0025
   minval: 0.0015
   maxval: 0.0040
   numvals: 21
