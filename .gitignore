@@ -20,6 +20,6 @@ wandb/
 *.pkl
 
 # Ignore CartPole experimental results
-results/*/*/*.png
-results/*/*/*.pkl
+results/**/*.png
+results/**/*.pkl
 models/
