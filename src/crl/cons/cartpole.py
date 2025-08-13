@@ -7,7 +7,6 @@ from typing import Literal
 import yaml
 from pathlib import Path
 
-
 ClassicControl = Literal["CartPole-v1", "Acrobot-v1", "Pendulum-v1", "MountainCar-v0"]
 
 

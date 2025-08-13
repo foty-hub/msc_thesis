@@ -51,8 +51,9 @@ EVAL_PARAMETERS = {
     # CartPole: vary pole length around nominal 0.5 value
     "CartPole-v1": ("length", np.linspace(0.1, 2.0, 20), [6] * 4),
     # Acrobot: vary link 1 length (0.5x–2.0x of default 1.0)
-    "Acrobot-v1": ("LINK_LENGTH_1", np.linspace(0.5, 2.0, 16), [8] * 6),
+    # "Acrobot-v1": ("LINK_LENGTH_1", np.linspace(0.5, 2.0, 16), [8] * 6),
     # "Acrobot-v1": ("LINK_MASS_1", np.linspace(0.5, 2.0, 16), [4] * 6),
+    "Acrobot-v1": ("LINK_MOI", np.arange(0.5, 2.1, 0.1), [8] * 6),
     # MountainCar: vary gravity around default 0.0025
     "MountainCar-v0": ("gravity", np.arange(0.001, 0.005 + 0.00025, 0.00025), [10] * 2),
 }
@@ -267,5 +268,5 @@ if __name__ == "__main__":
         assert N_TRAIN_EPISODES == 120_000
     else:
         assert N_TRAIN_EPISODES == 50_000
-    results = main("MountainCar-v0")
+    results = main("Acrobot-v1")
 # %%
