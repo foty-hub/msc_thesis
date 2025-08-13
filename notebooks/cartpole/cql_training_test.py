@@ -25,7 +25,8 @@ dqn_args = {
 
 def single_steps_experiment(train_steps: int) -> list[dict[str, Any]]:
     exp_results = []
-    for alpha in tqdm(np.arange(0.0, 2.1, 0.1), leave=False, desc=f"{train_steps:,}"):
+    # for alpha in tqdm(np.arange(0.0, 2.1, 0.1), leave=False, desc=f"{train_steps:,}"):
+    for alpha in tqdm([0.0, 1.0, 2.0], leave=False):
         env = gym.make("CartPole-v1")
         agent = CQLDQN(
             env=env,
@@ -36,13 +37,17 @@ def single_steps_experiment(train_steps: int) -> list[dict[str, Any]]:
 
         agent.learn(total_timesteps=train_steps, progress_bar=False)
 
-        mean_r, std_r = evaluate_policy(agent, agent.get_env(), n_eval_episodes=50)
+        returns, ep_lengths = evaluate_policy(
+            agent,
+            agent.get_env(),
+            n_eval_episodes=100,
+            return_episode_rewards=True,
+        )
         exp_results.append(
             {
                 "train_steps": train_steps,
                 "alpha": alpha,
-                "return_mean": mean_r,
-                "return_std": std_r,
+                "returns": returns,
             }
         )
     return exp_results
@@ -51,13 +56,12 @@ def single_steps_experiment(train_steps: int) -> list[dict[str, Any]]:
 # %%
 
 all_results = []
-for train_steps in [50_000, 60_000, 70_000, 80_000, 90_000, 100_000]:
+for train_steps in [50_000, 75_000, 80_000, 100_000]:
     exp_result = single_steps_experiment(train_steps)
     all_results.extend(exp_result)
 
 # Save results to pickle file
-
-with open("cql_results.pkl", "wb") as f:
+with open("cql_results_withreturns.pkl", "wb") as f:
     pickle.dump(all_results, f)
 
 # %%
