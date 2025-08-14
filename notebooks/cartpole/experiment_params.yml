@@ -1,0 +1,28 @@
+CartPole-v1-length:
+  env: CartPole-v1
+  alpha: 0.1
+  parameter: length
+  nominal_value: 0.5
+  minval: 0.1
+  maxval: 2.0
+  numvals: 20
+  bins_per_dim: 6
+
+Acrobot-v1-LINK_LENGTH_1:
+  env: Acrobot-v1
+  parameter: LINK_LENGTH_1
+  nominal_value: 1.0
+  minval: 0.5
+  maxval: 2.0
+  numvals: 16
+  bins_per_dim: 4
+
+
+MountainCar-v0-gravity:
+  env: MountainCar-v0
+  parameter: gravity
+  nominal_value: 0.0025
+  minval: 0.0015
+  maxval: 0.0040
+  numvals: 21
+  bins_per_dim: 6
