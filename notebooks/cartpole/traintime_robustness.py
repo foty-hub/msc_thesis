@@ -17,16 +17,17 @@ from crl.cons.calib import (
     signed_score,
 )
 from crl.cons.cartpole import instantiate_eval_env, learn_dqn_policy
+from crl.cons.cql import learn_cqldqn_policy
 from crl.cons.discretise import build_tiling, build_tile_coding
 
 # fmt: off
-_DISCOUNT = 0.98            # Gamma/discount factor for the DQN
+_DISCOUNT = 0.99            # Gamma/discount factor for the DQN
 ALPHA = 0.1                 # Conformal prediction miscoverage level
 MIN_CALIB = 50              # Minimum threshold for a calibration set to be leveraged
 NUM_EXPERIMENTS = 25
 NUM_EVAL_EPISODES=250
 N_CALIB_TRANSITIONS=50_000
-N_TRAIN_EPISODES = 120_000
+N_TRAIN_EPISODES = 200_000
 
 @dataclass
 class ExperimentParams:
@@ -49,13 +50,15 @@ class ExperimentParams:
 
 EVAL_PARAMETERS = {
     # CartPole: vary pole length around nominal 0.5 value
-    "CartPole-v1": ("length", np.linspace(0.1, 2.0, 20), [6] * 4),
+    # "CartPole-v1": ("length", np.linspace(0.1, 2.0, 20), [6] * 4),
+    "CartPole-v1": ("length", np.arange(0.1, 4.1, 0.2), [6] * 4),
     # Acrobot: vary link 1 length (0.5x–2.0x of default 1.0)
     # "Acrobot-v1": ("LINK_LENGTH_1", np.linspace(0.5, 2.0, 16), [8] * 6),
     # "Acrobot-v1": ("LINK_MASS_1", np.linspace(0.5, 2.0, 16), [4] * 6),
     "Acrobot-v1": ("LINK_MOI", np.arange(0.5, 2.1, 0.1), [8] * 6),
     # MountainCar: vary gravity around default 0.0025
     "MountainCar-v0": ("gravity", np.arange(0.001, 0.005 + 0.00025, 0.00025), [10] * 2),
+    "LunarLander-v3": ("gravity", np.arange(-12, -0, 0.5), [6] * 8),
 }
 
 
@@ -78,7 +81,7 @@ def run_eval(
 
     for ep in range(num_eps):
         obs = ep_env.reset()
-        for t in range(500):
+        for t in range(1000):
             q_vals = model.q_net(model.policy.obs_to_tensor(obs)[0]).flatten()
             qhat_global = calib_sets["fallback"]
 
@@ -138,14 +141,25 @@ def run_shift_experiment(
     return exp_result
 
 
-def run_single_seed_experiment(env_name: str, seed: int):
+def run_single_seed_experiment(
+    env_name: str, seed: int, cql_loss_weight: float | None = None
+):
     # train the nominal policy
-    model, vec_env = learn_dqn_policy(
-        env_name=env_name,
-        seed=seed,
-        discount=_DISCOUNT,
-        total_timesteps=N_TRAIN_EPISODES,
-    )
+    if cql_loss_weight is not None:
+        model, vec_env = learn_cqldqn_policy(
+            env_name=env_name,
+            seed=seed,
+            discount=_DISCOUNT,
+            total_timesteps=N_TRAIN_EPISODES,
+            cql_alpha=cql_loss_weight,
+        )
+    else:
+        model, vec_env = learn_dqn_policy(
+            env_name=env_name,
+            seed=seed,
+            discount=_DISCOUNT,
+            total_timesteps=N_TRAIN_EPISODES,
+        )
     # discretise the space and collect observations for the calibration sets
     param, param_values, state_bins = EVAL_PARAMETERS[env_name]
     # discretise, n_discrete_states = build_tiling(model, vec_env, state_bins=state_bins)
@@ -231,7 +245,7 @@ def plot_single_experiment(seed: int, results: list[dict], env_name: str):
     plt.xlabel(x_key)
     if x_key == "length":
         plt.axvline(0.5, linestyle="--", c="k", alpha=0.5)
-        plt.xlim(0, 2.0)
+        plt.xlim(0, 4.1)
         plt.ylim(0, None)
     despine(plt.gca())
     plt.grid(True, linestyle="--", alpha=0.5)
@@ -245,10 +259,14 @@ def plot_single_experiment(seed: int, results: list[dict], env_name: str):
 # %%
 def main(env_name: str):
     all_results = []
+    # cql_loss_weight = 1.0
+    cql_loss_weight = None
 
     # for seed in range(NUM_EXPERIMENTS):
     for seed in range(NUM_EXPERIMENTS):
-        single_exp_result = run_single_seed_experiment(env_name=env_name, seed=seed)
+        single_exp_result = run_single_seed_experiment(
+            env_name=env_name, seed=seed, cql_loss_weight=cql_loss_weight
+        )
         plot_single_experiment(seed, single_exp_result, env_name)
         all_results.append({"seed": seed, "results": single_exp_result})
         with open(f"results/{env_name}/robustness_experiment.pkl", "wb") as f:
@@ -259,14 +277,8 @@ def main(env_name: str):
 
 if __name__ == "__main__":
     # envs = ["CartPole-v1", "Acrobot-v1", "MountainCar-v0"]
-    # for env in envs:
-    #     all_results = main(env)
-    # main("CartPole-v1")
-    # results = main("Acrobot-v1")
-    env = "MountainCar-v0"
+    env = "LunarLander-v3"
     if env == "MountainCar-v0":
         assert N_TRAIN_EPISODES == 120_000
-    else:
-        assert N_TRAIN_EPISODES == 50_000
-    results = main("Acrobot-v1")
+    results = main(env)
 # %%

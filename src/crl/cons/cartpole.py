@@ -7,7 +7,9 @@ from typing import Literal
 import yaml
 from pathlib import Path
 
-ClassicControl = Literal["CartPole-v1", "Acrobot-v1", "Pendulum-v1", "MountainCar-v0"]
+ClassicControl = Literal[
+    "CartPole-v1", "Acrobot-v1", "LunarLander-v3", "MountainCar-v0"
+]
 
 
 def instantiate_vanilla_dqn(
@@ -59,12 +61,10 @@ def instantiate_eval_env(
             - max_vel_1: float (default: 4 * pi)
             - max_vel_2: float (default: 9 * pi)
 
-        Pendulum-v1:
-            - max_speed: float (default: 8.0)
-            - max_torque: float (default: 2.0)
-            - g: float (default: 10.0)
-            - m: float (default: 1.0)
-            - l: float (default: 1.0)
+        LunarLander-v3:
+            - gravity: float (default: -10, [-12, 0])
+            - wind_power: float (default: 15.0, [0, 20])
+            - turbulence_power: (default: 1.5, [0, 2])
 
         MountainCar-v0:
             - min_position: float (default: -1.2)
