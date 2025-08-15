@@ -12,17 +12,13 @@ ClassicControl = Literal[
 ]
 
 
-def instantiate_vanilla_dqn(
-    env_name: ClassicControl, seed: int = 0, discount: float = 0.99
-) -> DQN:
+def instantiate_vanilla_dqn(env_name: ClassicControl, seed: int = 0) -> DQN:
     env = gym.make(env_name, render_mode="rgb_array")
 
     # using SB3 zoo suggested hyperparameters (path relative to this file)
     config_path = Path(__file__).resolve().parent / "configs" / f"{env_name}.yml"
     with open(config_path, "r") as f:
         dqn_args = yaml.safe_load(f)
-
-    dqn_args["gamma"] = discount
 
     model = DQN(env=env, seed=seed, **dqn_args)
     return model
@@ -97,7 +93,6 @@ def instantiate_eval_env(
 def learn_dqn_policy(
     env_name: ClassicControl,
     seed: int = 0,
-    discount: float = 0.99,
     total_timesteps: int = 50_000,
     model_dir: str = "models",
     train_from_scratch: bool = False,
@@ -117,7 +112,7 @@ def learn_dqn_policy(
     else:
         # Train a new model from scratch
         print(f"Learning from scratch: {seed}")
-        model = instantiate_vanilla_dqn(env_name, seed, discount)
+        model = instantiate_vanilla_dqn(env_name, seed)
         model.learn(total_timesteps=total_timesteps, progress_bar=True)
         model.save(model_path)
 
@@ -135,7 +130,7 @@ def learn_dqn_policy(
 def main():
     from stable_baselines3.common.evaluation import evaluate_policy
 
-    model, vec_env = learn_dqn_policy(env_name="Acrobot-v1", seed=1, discount=0.99)
+    model, vec_env = learn_dqn_policy(env_name="Acrobot-v1", seed=1)
 
     print(evaluate_policy(model, vec_env))
 

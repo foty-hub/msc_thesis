@@ -94,7 +94,6 @@ def _alpha_to_fname(alpha: float) -> str:
 def instantiate_cql_dqn(
     env_name: ClassicControl,
     seed: int = 0,
-    discount: float = 0.99,
     cql_alpha: float = 0.0,
 ) -> CQLDQN:
     env = gym.make(env_name, render_mode="rgb_array")
@@ -104,8 +103,6 @@ def instantiate_cql_dqn(
     with open(config_path, "r") as f:
         dqn_args = yaml.safe_load(f)
 
-    dqn_args["gamma"] = discount
-
     model = CQLDQN(env=env, seed=seed, cql_alpha=cql_alpha, **dqn_args)
     return model
 
@@ -113,7 +110,6 @@ def instantiate_cql_dqn(
 def learn_cqldqn_policy(
     env_name: ClassicControl,
     seed: int = 0,
-    discount: float = 0.99,
     cql_alpha: float = 0.0,
     total_timesteps: int = 50_000,
     model_dir: str = "models",
@@ -135,7 +131,7 @@ def learn_cqldqn_policy(
     else:
         # Train a new model from scratch
         print(f"Learning CQLDQN from scratch: {seed}, alpha: {cql_alpha}")
-        model = instantiate_cql_dqn(env_name, seed, discount, cql_alpha)
+        model = instantiate_cql_dqn(env_name, seed, cql_alpha)
         model.learn(total_timesteps=total_timesteps, progress_bar=True)
         model.save(model_path)
 
