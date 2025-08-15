@@ -34,7 +34,7 @@ def build_tile_coding(model: DQN, vec_env: VecEnv, tiles: int, tilings: int):
         state_vals = tc.get_indices(obs[0])
         # offset so there's a unique id for each action and state pair.
         state_vals = action * n_state_features + state_vals
-        return state_vals[0]  # TODO: tidy this up to handle multiple output ids
+        return state_vals
 
     return discretise, n_state_features * n_actions
 

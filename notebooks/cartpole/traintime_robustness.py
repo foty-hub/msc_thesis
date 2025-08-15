@@ -11,23 +11,23 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from crl.cons.calib import (
-    compute_lower_bounds,
+    compute_corrections,
     collect_transitions,
     fill_calib_sets,
     signed_score,
+    correction_for,
 )
 from crl.cons.cartpole import instantiate_eval_env, learn_dqn_policy
 from crl.cons.cql import learn_cqldqn_policy
 from crl.cons.discretise import build_tiling, build_tile_coding
 
 # fmt: off
-_DISCOUNT = 0.99            # Gamma/discount factor for the DQN
 ALPHA = 0.1                 # Conformal prediction miscoverage level
 MIN_CALIB = 50              # Minimum threshold for a calibration set to be leveraged
 NUM_EXPERIMENTS = 25
 NUM_EVAL_EPISODES=250
 N_CALIB_TRANSITIONS=50_000
-N_TRAIN_EPISODES = 200_000
+N_TRAIN_EPISODES = 50_000
 
 @dataclass
 class ExperimentParams:
@@ -51,14 +51,14 @@ class ExperimentParams:
 EVAL_PARAMETERS = {
     # CartPole: vary pole length around nominal 0.5 value
     # "CartPole-v1": ("length", np.linspace(0.1, 2.0, 20), [6] * 4),
-    "CartPole-v1": ("length", np.arange(0.1, 4.1, 0.2), [6] * 4),
+    "CartPole-v1": ("length", np.arange(0.1, 3.1, 0.2), 6, 1),
     # Acrobot: vary link 1 length (0.5x–2.0x of default 1.0)
     # "Acrobot-v1": ("LINK_LENGTH_1", np.linspace(0.5, 2.0, 16), [8] * 6),
     # "Acrobot-v1": ("LINK_MASS_1", np.linspace(0.5, 2.0, 16), [4] * 6),
-    "Acrobot-v1": ("LINK_MOI", np.arange(0.5, 2.1, 0.1), [8] * 6),
+    "Acrobot-v1": ("LINK_MOI", np.arange(0.5, 2.1, 0.1), 8, 1),
     # MountainCar: vary gravity around default 0.0025
-    "MountainCar-v0": ("gravity", np.arange(0.001, 0.005 + 0.00025, 0.00025), [10] * 2),
-    "LunarLander-v3": ("gravity", np.arange(-12, -0, 0.5), [6] * 8),
+    "MountainCar-v0": ("gravity", np.arange(0.001, 0.005 + 0.00025, 0.00025), 10, 1),
+    "LunarLander-v3": ("gravity", np.arange(-12, -0, 0.5), 4, 4),
 }
 
 
@@ -68,7 +68,9 @@ def run_eval(
     num_eps: int,
     conformalise: bool,
     ep_env: gym.Env,
-    calib_sets: dict[dict[str, Any]],
+    qhats: np.ndarray,
+    agg: str = "max",
+    clip_correction: bool = False,
 ) -> list[float]:
     episodic_returns = []
 
@@ -83,14 +85,20 @@ def run_eval(
         obs = ep_env.reset()
         for t in range(1000):
             q_vals = model.q_net(model.policy.obs_to_tensor(obs)[0]).flatten()
-            qhat_global = calib_sets["fallback"]
 
             if conformalise:
-                # Adjust each action using the conformal prediction lower bound
+                # Adjust the qvalues of each action using
+                # the correction from CP
                 for a in range(num_actions):
-                    obs_disc = discretise(obs, np.array([a]))
-                    qhat = calib_sets[obs_disc].get("qhat", qhat_global)
-                    q_vals[a] = q_vals[a] - qhat
+                    correction = correction_for(
+                        obs,
+                        a,
+                        qhats,
+                        discretise,
+                        agg=agg,
+                        clip_correction=clip_correction,
+                    )
+                    q_vals[a] -= correction
 
             action = q_vals.argmax().numpy().reshape(1)
 
@@ -105,7 +113,7 @@ def run_eval(
 
 def run_shift_experiment(
     model: DQN,
-    calib_sets: dict,
+    qhats: np.ndarray,
     discretise: Callable,
     env_name: str,
     shift_params: dict,
@@ -121,7 +129,7 @@ def run_shift_experiment(
         num_eps=num_eps,
         conformalise=True,
         ep_env=eval_vec_env,
-        calib_sets=calib_sets,
+        qhats=qhats,
     )
     returns_noconf = run_eval(
         model,
@@ -129,7 +137,7 @@ def run_shift_experiment(
         num_eps=num_eps,
         conformalise=False,
         ep_env=eval_vec_env,
-        calib_sets=calib_sets,
+        qhats=qhats,
     )
 
     exp_result = {
@@ -149,7 +157,6 @@ def run_single_seed_experiment(
         model, vec_env = learn_cqldqn_policy(
             env_name=env_name,
             seed=seed,
-            discount=_DISCOUNT,
             total_timesteps=N_TRAIN_EPISODES,
             cql_alpha=cql_loss_weight,
         )
@@ -157,14 +164,13 @@ def run_single_seed_experiment(
         model, vec_env = learn_dqn_policy(
             env_name=env_name,
             seed=seed,
-            discount=_DISCOUNT,
             total_timesteps=N_TRAIN_EPISODES,
         )
     # discretise the space and collect observations for the calibration sets
-    param, param_values, state_bins = EVAL_PARAMETERS[env_name]
+    param, param_values, tiles, tilings = EVAL_PARAMETERS[env_name]
     # discretise, n_discrete_states = build_tiling(model, vec_env, state_bins=state_bins)
     discretise, n_discrete_states = build_tile_coding(
-        model, vec_env, tiles=state_bins[0], tilings=1
+        model, vec_env, tiles=tiles, tilings=tilings
     )
     buffer = collect_transitions(model, vec_env, n_transitions=N_CALIB_TRANSITIONS)
     calib_sets = fill_calib_sets(
@@ -172,10 +178,9 @@ def run_single_seed_experiment(
         buffer,
         discretise,
         n_discrete_states,
-        discount=_DISCOUNT,
         score=signed_score,
     )
-    calib_sets, n_calibs = compute_lower_bounds(
+    qhats, visits = compute_corrections(
         calib_sets,
         alpha=ALPHA,
         min_calib=MIN_CALIB,
@@ -190,7 +195,7 @@ def run_single_seed_experiment(
         results.append(
             run_shift_experiment(
                 model,
-                calib_sets,
+                qhats,
                 discretise,
                 shift_params=eval_parameters,
                 env_name=env_name,
@@ -204,13 +209,7 @@ def run_single_seed_experiment(
 def plot_single_experiment(seed: int, results: list[dict], env_name: str):
     conf_returns = np.array([res["returns_conf"] for res in results])
     noconf_returns = np.array([res["returns_noconf"] for res in results])
-    # Determine which shift parameter was swept (the key that's not a return/stat field)
-    _ignore_keys = {"returns_conf", "returns_noconf", "num_episodes"}
-    shift_keys = [k for k in results[0].keys() if k not in _ignore_keys]
-    assert len(shift_keys) == 1, (
-        f"Expected a single shift parameter, found: {shift_keys}"
-    )
-    x_key = shift_keys[0]
+    x_key = EVAL_PARAMETERS[env_name][0]
     xvals = np.array([res[x_key] for res in results])
     import matplotlib.pyplot as plt
     from crl.utils.graphing import despine
@@ -245,7 +244,7 @@ def plot_single_experiment(seed: int, results: list[dict], env_name: str):
     plt.xlabel(x_key)
     if x_key == "length":
         plt.axvline(0.5, linestyle="--", c="k", alpha=0.5)
-        plt.xlim(0, 4.1)
+        plt.xlim(0, max(EVAL_PARAMETERS[env_name][1]))
         plt.ylim(0, None)
     despine(plt.gca())
     plt.grid(True, linestyle="--", alpha=0.5)
@@ -277,7 +276,7 @@ def main(env_name: str):
 
 if __name__ == "__main__":
     # envs = ["CartPole-v1", "Acrobot-v1", "MountainCar-v0"]
-    env = "LunarLander-v3"
+    env = "CartPole-v1"
     if env == "MountainCar-v0":
         assert N_TRAIN_EPISODES == 120_000
     results = main(env)
