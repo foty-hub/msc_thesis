@@ -15,8 +15,8 @@ AggregationStrategy = Literal["max", "mean", "median"]
 def collect_transitions(
     model: DQN,
     env: VecEnv,
-    n_transitions: int = 100_000,
-):
+    n_transitions: int,
+) -> ReplayBuffer:
     "run episodes and record SARSA transitions to a replay buffer"
     # TODO: this could stop recording transitions more intelligently if it just updated calib_sets as it went.
     buffer = ReplayBuffer(capacity=n_transitions)
@@ -35,6 +35,93 @@ def collect_transitions(
         if done:
             obs = env.reset()  # start new episode
 
+    return buffer
+
+
+# TODO: this doesn't work :~<
+def collect_training_transitions(
+    model: DQN,
+    env: VecEnv,
+    n_transitions: int,
+) -> ReplayBuffer:
+    """Fills a replay buffer by accessing the replay buffer from a trained
+    stablebaslines3 DQN"""
+    # Pull transitions directly from the SB3 replay buffer, rather than
+    # interacting with the environment. We mirror the shapes used by
+    # `collect_transitions`: state/next_state include a leading env
+    # dimension (of size 1), and action/reward/done are arrays with shape
+    # (1,).
+    sb3_rb = getattr(model, "replay_buffer", None)
+    if sb3_rb is None:
+        raise ValueError(
+            "DQN model has no replay_buffer. Ensure the model was trained and has a populated buffer."
+        )
+
+    # Determine how many transitions are available in the SB3 buffer
+    if getattr(sb3_rb, "full", False):
+        available = sb3_rb.buffer_size
+    else:
+        available = sb3_rb.pos
+
+    k = min(n_transitions, available)
+    if available < n_transitions:
+        print(
+            f"[collect_training_transitions] Warning: requested {n_transitions} transitions, "
+            f"but only {available} available in the SB3 replay buffer; using all available."
+        )
+
+    # Build indices of the most recent `k` transitions in chronological order
+    if getattr(sb3_rb, "full", False):
+        buf_size = sb3_rb.buffer_size
+        start = (sb3_rb.pos - k) % buf_size
+        indices = [(start + i) % buf_size for i in range(k)]
+    else:
+        start = sb3_rb.pos - k
+        indices = list(range(start, start + k))
+
+    # Create our local replay buffer to hold the copied transitions
+    buffer = ReplayBuffer(capacity=k)
+
+    # Helper to coerce scalar/array to shape (1,)
+    def _as_row_array(x, dtype=None):
+        # x: B, N_env, D
+        arr = np.asarray(x)
+        if arr.shape == ():
+            arr = np.array([arr], dtype=dtype)
+        elif dtype is not None and arr.dtype != dtype:
+            arr = arr[2].astype(dtype)
+        return arr
+
+    # Iterate through selected indices and push into our buffer
+    for idx in indices:
+        obs = sb3_rb.observations[idx]
+        next_obs = sb3_rb.next_observations[idx]
+        action = sb3_rb.actions[idx]
+        reward = sb3_rb.rewards[idx]
+        done_raw = sb3_rb.dones[idx]
+        timeout = None
+        if hasattr(sb3_rb, "timeouts") and sb3_rb.timeouts is not None:
+            timeout = sb3_rb.timeouts[idx]
+
+        # Only terminal if done and not timeout (time-limit truncation)
+        done_bool = np.asarray(done_raw).astype(bool)
+        if timeout is not None:
+            done_bool = np.logical_and(
+                done_bool, np.logical_not(np.asarray(timeout).astype(bool))
+            )
+        done_arr = _as_row_array(done_bool, dtype=bool)
+        # Ensure shapes to match collect_transitions
+        action_arr = _as_row_array(action)
+        reward_arr = _as_row_array(reward)
+
+        # Add leading env dimension to observations (size 1)
+        state = np.expand_dims(np.asarray(obs), axis=0)
+        next_state = np.expand_dims(np.asarray(next_obs), axis=0)
+
+        # Next action required for SARSA: greedy with the current policy
+        next_action, _ = model.predict(next_state, deterministic=True)
+
+        buffer.push(state, action_arr, reward_arr, next_state, next_action, done_arr)
     return buffer
 
 

@@ -14,6 +14,7 @@ from typing import Sequence
 from crl.cons.calib import (
     compute_corrections,
     collect_transitions,
+    collect_training_transitions,
     fill_calib_sets,
     signed_score,
     correction_for,
@@ -27,8 +28,7 @@ ALPHA = 0.1                 # Conformal prediction miscoverage level
 MIN_CALIB = 50              # Minimum threshold for a calibration set to be leveraged
 NUM_EXPERIMENTS = 25
 NUM_EVAL_EPISODES=250
-N_CALIB_TRANSITIONS=1_000_000
-# N_TRAIN_EPISODES = 50_000
+N_CALIB_TRANSITIONS=50_000
 N_TRAIN_EPISODES = 50_000
 
 @dataclass
@@ -193,7 +193,10 @@ def run_single_seed_experiment(
     discretise, n_discrete_states = build_tile_coding(
         model, vec_env, tiles=tiles, tilings=tilings
     )
-    buffer = collect_transitions(model, vec_env, n_transitions=N_CALIB_TRANSITIONS)
+    # buffer = collect_transitions(model, vec_env, n_transitions=N_CALIB_TRANSITIONS)
+    buffer = collect_training_transitions(
+        model, vec_env, n_transitions=N_CALIB_TRANSITIONS
+    )
     calib_sets = fill_calib_sets(
         model,
         buffer,
