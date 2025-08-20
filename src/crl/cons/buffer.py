@@ -24,9 +24,9 @@ class ReplayBuffer:
     def __len__(self):
         return self.capacity if self.full else self.pos
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: int) -> Transition:
         return self.buffer[key]
 
-    def sample(self, batch_size: int):
+    def sample(self, batch_size: int) -> list[Transition]:
         idx = np.random.choice(len(self), batch_size, replace=False)
         return [self.buffer[i] for i in idx]
