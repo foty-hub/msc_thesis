@@ -14,7 +14,7 @@ from typing import Sequence
 from crl.cons.calib import (
     compute_corrections,
     collect_transitions,
-    collect_training_transitions,
+    # collect_training_transitions,
     fill_calib_sets,
     signed_score,
     correction_for,
@@ -53,7 +53,8 @@ class ExperimentParams:
 EVAL_PARAMETERS = {
     # CartPole: vary pole length around nominal 0.5 value
     # "CartPole-v1": ("length", np.linspace(0.1, 2.0, 20), [6] * 4),
-    "CartPole-v1": ("length", np.arange(0.1, 3.1, 0.2), 6, 1),
+    # "CartPole-v1": ("length", np.arange(0.1, 3.1, 0.2), 6, 1),
+    "CartPole-v1": ("length", np.arange(0.1, 3.1, 0.2), 20, 1),
     # Acrobot: vary link 1 length (0.5x–2.0x of default 1.0)
     "Acrobot-v1": ("LINK_LENGTH_1", np.linspace(0.5, 2.0, 16), 6, 1),
     # "Acrobot-v1": ("LINK_MASS_1", np.linspace(0.5, 2.0, 16), [4] * 6),
@@ -100,7 +101,7 @@ def run_eval(
                         agg=agg,
                         clip_correction=clip_correction,
                     )
-                    q_vals[a] -= correction / (1 - discount)
+                    q_vals[a] -= correction
 
             action = q_vals.argmax().numpy().reshape(1)
 
@@ -193,10 +194,10 @@ def run_single_seed_experiment(
     discretise, n_discrete_states = build_tile_coding(
         model, vec_env, tiles=tiles, tilings=tilings
     )
-    # buffer = collect_transitions(model, vec_env, n_transitions=N_CALIB_TRANSITIONS)
-    buffer = collect_training_transitions(
-        model, vec_env, n_transitions=N_CALIB_TRANSITIONS
-    )
+    buffer = collect_transitions(model, vec_env, n_transitions=N_CALIB_TRANSITIONS)
+    # buffer = collect_training_transitions(
+    #     model, vec_env, n_transitions=N_CALIB_TRANSITIONS
+    # )
     calib_sets = fill_calib_sets(
         model,
         buffer,
