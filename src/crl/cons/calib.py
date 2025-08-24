@@ -178,6 +178,90 @@ def fill_calib_sets(
     return calib_sets
 
 
+def fill_calib_sets_mc(
+    model: DQN,
+    buffer: ReplayBuffer,
+    discretise: Callable,
+    n_discrete_states: int,
+    maxlen: int = 500,
+    score: Callable = signed_score,
+):
+    """
+    Variant of `fill_calib_sets` that uses Monte Carlo returns as the target
+    rather than a 1-step Bellman bootstrap. For each transition t, the target is
+    G_t = r_t + gamma r_{t+1} + gamma^2 r_{t+2} + ... until the end of the episode.
+
+    Parameters mirror `fill_calib_sets`.
+    """
+    # Initialise per-(state, action) deques
+    calib_sets = {}
+    for (sa,) in np.ndindex((n_discrete_states)):
+        calib_sets[sa] = dict(
+            y_preds=deque(maxlen=maxlen),
+            y_trues=deque(maxlen=maxlen),
+            scores=deque(maxlen=maxlen),
+        )
+
+    discount = model.gamma
+
+    # Mirror the original behaviour of ignoring the final buffer slot
+    n = len(buffer) - 1
+    if n <= 0:
+        return calib_sets
+
+    # Precompute Monte Carlo returns for each transition in this buffer
+    rewards = np.empty(n, dtype=float)
+    dones = np.empty(n, dtype=bool)
+    for i in range(n):
+        trans = buffer[i]
+        r = np.asarray(trans.reward).reshape(-1)[0]
+        d = bool(np.asarray(trans.done).reshape(-1)[0])
+        rewards[i] = float(r)
+        dones[i] = d
+
+    mc_returns = np.empty(n, dtype=float)
+    G = 0.0
+    for i in range(n - 1, -1, -1):
+        # resets at episode boundary (done = True)
+        if dones[i]:
+            G = rewards[i]
+        else:
+            G = rewards[i] + discount * G
+        mc_returns[i] = G
+
+    # Populate calibration sets using MC targets
+    for i in range(n):
+        trans = buffer[i]
+        with torch.no_grad():
+            # Predicted Q(s,a)
+            obs_tensor = model.policy.obs_to_tensor(trans.state)[0]
+            q_pred = model.q_net(obs_tensor)
+
+            # Ensure a scalar action index for tensor indexing
+            act_scalar = int(np.asarray(trans.action).reshape(-1)[0])
+            y_pred = q_pred[0, act_scalar]
+
+            # MC target for this step
+            y_true = mc_returns[i]
+
+            # Convert to plain floats for scoring/deques
+            y_pred_val = (
+                float(y_pred.detach().cpu().numpy())
+                if hasattr(y_pred, "detach")
+                else float(y_pred)
+            )
+            y_true_val = float(y_true)
+
+            obs_disc = discretise(trans.state, trans.action)
+            for idx in obs_disc:
+                idx = int(idx)
+                calib_sets[idx]["y_preds"].append(y_pred_val)
+                calib_sets[idx]["y_trues"].append(y_true_val)
+                calib_sets[idx]["scores"].append(score(y_pred_val, y_true_val))
+
+    return calib_sets
+
+
 def compute_corrections(calib_sets: dict, alpha: float, min_calib: int):
     qhats = np.full(len(calib_sets), fill_value=np.nan)
     visits = np.zeros_like(qhats)

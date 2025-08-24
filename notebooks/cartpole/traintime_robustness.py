@@ -16,6 +16,7 @@ from crl.cons.calib import (
     collect_transitions,
     # collect_training_transitions,
     fill_calib_sets,
+    fill_calib_sets_mc,
     signed_score,
     correction_for,
 )
@@ -28,8 +29,9 @@ ALPHA = 0.1                 # Conformal prediction miscoverage level
 MIN_CALIB = 50              # Minimum threshold for a calibration set to be leveraged
 NUM_EXPERIMENTS = 25
 NUM_EVAL_EPISODES=250
-N_CALIB_TRANSITIONS=50_000
+N_CALIB_TRANSITIONS=1_000
 N_TRAIN_EPISODES = 50_000
+USE_MC_RETURN_SCORE = True
 
 @dataclass
 class ExperimentParams:
@@ -53,8 +55,7 @@ class ExperimentParams:
 EVAL_PARAMETERS = {
     # CartPole: vary pole length around nominal 0.5 value
     # "CartPole-v1": ("length", np.linspace(0.1, 2.0, 20), [6] * 4),
-    # "CartPole-v1": ("length", np.arange(0.1, 3.1, 0.2), 6, 1),
-    "CartPole-v1": ("length", np.arange(0.1, 3.1, 0.2), 20, 1),
+    "CartPole-v1": ("length", np.arange(0.1, 3.1, 0.2), 6, 1),
     # Acrobot: vary link 1 length (0.5x–2.0x of default 1.0)
     "Acrobot-v1": ("LINK_LENGTH_1", np.linspace(0.5, 2.0, 16), 6, 1),
     # "Acrobot-v1": ("LINK_MASS_1", np.linspace(0.5, 2.0, 16), [4] * 6),
@@ -195,16 +196,22 @@ def run_single_seed_experiment(
         model, vec_env, tiles=tiles, tilings=tilings
     )
     buffer = collect_transitions(model, vec_env, n_transitions=N_CALIB_TRANSITIONS)
-    # buffer = collect_training_transitions(
-    #     model, vec_env, n_transitions=N_CALIB_TRANSITIONS
-    # )
-    calib_sets = fill_calib_sets(
-        model,
-        buffer,
-        discretise,
-        n_discrete_states,
-        score=signed_score,
-    )
+    if not USE_MC_RETURN_SCORE:
+        calib_sets = fill_calib_sets(
+            model,
+            buffer,
+            discretise,
+            n_discrete_states,
+            score=signed_score,
+        )
+    else:
+        calib_sets = fill_calib_sets_mc(
+            model,
+            buffer,
+            discretise,
+            n_discrete_states,
+            score=signed_score,
+        )
     qhats, visits = compute_corrections(
         calib_sets,
         alpha=ALPHA,
@@ -321,7 +328,7 @@ def main(env_name: str):
             env_name=env_name, seed=seed, cql_loss_weight=cql_loss_weight
         )
         plot_robustness(seed, single_exp_result, env_name)
-        plot_occupancy_histograms(single_exp_result, env_name, seed)
+        # plot_occupancy_histograms(single_exp_result, env_name, seed)
         all_results.append({"seed": seed, "results": single_exp_result})
         with open(f"results/{env_name}/robustness_experiment.pkl", "wb") as f:
             pickle.dump(all_results, f)
@@ -357,3 +364,5 @@ if __name__ == "__main__":
 # plt.grid(linestyle="--", alpha=0.3)
 # despine(plt.gca())
 # plt.show()
+
+# %%
