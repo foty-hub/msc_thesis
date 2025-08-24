@@ -19,7 +19,8 @@ wandb/
 
 *.pkl
 
-# Ignore CartPole experimental results
+# Ignore CartPole experimental results and lunar lander pdf images
 results/**/*.png
 results/**/*.pkl
 models/
+results/lunarlander/**/*.pdf
