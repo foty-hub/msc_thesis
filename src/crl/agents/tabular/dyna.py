@@ -1,9 +1,11 @@
+from dataclasses import dataclass
 from typing import Protocol
+
 import gymnasium as gym
 import numpy as np
-from dataclasses import dataclass
-from crl.predictors.tabular import Predictor, NoPredictor
-from crl.agents.tabular.types import State, Action, Observation
+
+from crl.agents.tabular.types import Action, Observation, State
+from crl.predictors.tabular import NoPredictor, Predictor
 
 
 @dataclass

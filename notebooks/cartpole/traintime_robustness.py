@@ -1,31 +1,31 @@
 # %%
 import os
 import pickle
-import numpy as np
+from dataclasses import dataclass
+from typing import Callable, Literal, Sequence
+
 import gymnasium as gym
 import matplotlib.pyplot as plt
-from crl.utils.graphing import despine
-from tqdm import tqdm
-from typing import Any, Callable
+import numpy as np
 from stable_baselines3 import DQN
-from dataclasses import dataclass
-from typing import Sequence
+from tqdm import tqdm
 
+from crl.cons.agents import learn_cqldqn_policy, learn_ddqn_policy, learn_dqn_policy
 from crl.cons.calib import (
-    compute_corrections,
     collect_transitions,
-    # collect_training_transitions,
+    compute_corrections,
+    correction_for,
     fill_calib_sets,
     fill_calib_sets_mc,
     signed_score,
-    correction_for,
 )
-from crl.cons.cartpole import instantiate_eval_env, learn_dqn_policy
-from crl.cons.cql import learn_cqldqn_policy
 from crl.cons.discretise import build_tile_coding
+from crl.cons.env import instantiate_eval_env
+from crl.utils.graphing import despine
 
 # fmt: off
 ALPHA = 0.1                 # Conformal prediction miscoverage level
+CQL_ALPHA = 1.0
 MIN_CALIB = 50              # Minimum threshold for a calibration set to be leveraged
 NUM_EXPERIMENTS = 25
 NUM_EVAL_EPISODES=250
@@ -54,7 +54,6 @@ class ExperimentParams:
 
 EVAL_PARAMETERS = {
     # CartPole: vary pole length around nominal 0.5 value
-    # "CartPole-v1": ("length", np.linspace(0.1, 2.0, 20), [6] * 4),
     "CartPole-v1": ("length", np.arange(0.1, 3.1, 0.2), 6, 1),
     # Acrobot: vary link 1 length (0.5x–2.0x of default 1.0)
     "Acrobot-v1": ("LINK_LENGTH_1", np.linspace(0.5, 2.0, 16), 6, 1),
@@ -82,7 +81,6 @@ def run_eval(
 
     # Determine number of discrete actions
     num_actions = getattr(ep_env.action_space, "n")
-    discount = model.gamma
 
     for ep in range(num_eps):
         obs = ep_env.reset()
@@ -172,23 +170,35 @@ def run_shift_experiment(
     return exp_result
 
 
+ModelTypes = Literal["vanilla", "cql", "ddqn"]
+
+
 def run_single_seed_experiment(
-    env_name: str, seed: int, cql_loss_weight: float | None = None
+    env_name: str, seed: int, model_type: ModelTypes = "vanilla"
 ):
     # train the nominal policy
-    if cql_loss_weight is not None:
+    if model_type == "cql":
         model, vec_env = learn_cqldqn_policy(
             env_name=env_name,
             seed=seed,
             total_timesteps=N_TRAIN_EPISODES,
-            cql_alpha=cql_loss_weight,
+            cql_alpha=CQL_ALPHA,
         )
-    else:
+    elif model_type == "ddqn":
+        model, vec_env = learn_ddqn_policy(
+            env_name=env_name,
+            seed=seed,
+            total_timesteps=N_TRAIN_EPISODES,
+        )
+
+    elif model_type == "vanilla":
         model, vec_env = learn_dqn_policy(
             env_name=env_name,
             seed=seed,
             total_timesteps=N_TRAIN_EPISODES,
         )
+    else:
+        raise ValueError(f"{model_type=} not recognised. Should be one of {ModelTypes}")
     # discretise the space and collect observations for the calibration sets
     param, param_values, tiles, tilings = EVAL_PARAMETERS[env_name]
     # discretise, n_discrete_states = build_tiling(model, vec_env, state_bins=state_bins)

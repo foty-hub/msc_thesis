@@ -1,23 +1,21 @@
 # %%
-import torch
-import numpy as np
+from typing import Callable, Literal
+
 import gymnasium as gym
 import matplotlib.pyplot as plt
-
-from typing import Callable, Literal
-from collections import deque
+import numpy as np
 from stable_baselines3 import DQN
 from tqdm import tqdm
 
+from crl.cons.agents import learn_dqn_policy
 from crl.cons.calib import (
     collect_transitions,
-    fill_calib_sets,
     compute_corrections,
     correction_for,
+    fill_calib_sets,
 )
 from crl.cons.discretise import build_tile_coding
-from crl.cons.cartpole import learn_dqn_policy, instantiate_eval_env
-from crl.cons.buffer import ReplayBuffer
+from crl.cons.env import instantiate_eval_env
 
 # %%
 

@@ -1,28 +1,27 @@
 # %%
 import os
 import pickle
-import numpy as np
+from typing import Callable
+
 import gymnasium as gym
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-
+import numpy as np
+import torch
 from sklearn.neighbors import BallTree, KDTree
 from sklearn.preprocessing import StandardScaler
-import torch
-
-from crl.utils.graphing import despine
-from tqdm import tqdm
-from typing import Callable
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import VecEnv
+from tqdm import tqdm
 
+from crl.cons.agents import learn_dqn_policy
+from crl.cons.buffer import ReplayBuffer, Transition
 from crl.cons.calib import (
     collect_transitions,
     signed_score,
 )
-from crl.cons.cartpole import instantiate_eval_env, learn_dqn_policy
-from crl.cons.cql import learn_cqldqn_policy
-from crl.cons.buffer import ReplayBuffer, Transition
+from crl.cons.env import instantiate_eval_env
+from crl.utils.graphing import despine
 
 # fmt: off
 ALPHA = 0.1                 # Conformal prediction miscoverage level
@@ -295,8 +294,9 @@ good_seeds_perf = [int(s) for s in good_seeds_perf]
 avg_perf = (conf[good_seeds_perf].mean(2) / noconf[good_seeds_perf].mean(2)).mean(1).mean()
 print(f'{avg_perf:.3f}x improvement')
 # %%
-import pickle
 import os
+import pickle
+
 results_dir = f'results/{env_name}_nn'
 os.makedirs(results_dir)
 with open(f'{results_dir}/kernel_results_{env_name}.pkl', 'wb') as f:

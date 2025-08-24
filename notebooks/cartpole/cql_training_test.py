@@ -1,11 +1,12 @@
 # %%
-from tqdm import tqdm
 import pickle
-from crl.cons.cql import CQLDQN
 from typing import Any
-import numpy as np
+
 import gymnasium as gym
 from stable_baselines3.common.evaluation import evaluate_policy
+from tqdm import tqdm
+
+from crl.cons.agents.cql import CQLDQN
 
 dqn_args = {
     "policy": "MlpPolicy",

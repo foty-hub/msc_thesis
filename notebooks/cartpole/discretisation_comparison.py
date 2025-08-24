@@ -1,14 +1,14 @@
 # %%
 import numpy as np
 
-from crl.cons.cartpole import learn_dqn_policy
+from crl.cons.agents import learn_dqn_policy
 from crl.cons.discretise import (
-    build_binary_partition,
-    build_tile_coding,
-    build_cluster_partition,
-    run_test_episodes,
-    compute_bin_ranges,
     Node,
+    build_binary_partition,
+    build_cluster_partition,
+    build_tile_coding,
+    compute_bin_ranges,
+    run_test_episodes,
 )
 from crl.cons.discretise.gmm import _scale_with_ranges
 

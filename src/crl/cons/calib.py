@@ -1,9 +1,9 @@
 # %%
-import torch
-import numpy as np
-
 from collections import deque
 from typing import Callable, Literal
+
+import numpy as np
+import torch
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 

@@ -1,18 +1,18 @@
 # %%
-import torch
 import pickle
-import numpy as np
+from copy import deepcopy
+from typing import Any, Callable
+
 import gymnasium as gym
 import matplotlib.pyplot as plt
-
-from copy import deepcopy
-from tqdm import tqdm
-from typing import Callable, Any
+import numpy as np
+import torch
 from stable_baselines3 import DQN
+from tqdm import tqdm
 
-from crl.cons.calib import compute_lower_bounds, collect_transitions, fill_calib_sets
-from crl.cons.cartpole import learn_dqn_policy, instantiate_eval_env
+from crl.cons.calib import collect_transitions, compute_lower_bounds, fill_calib_sets
 from crl.cons.discretise import build_tiling
+from crl.cons.env import instantiate_eval_env, learn_dqn_policy
 
 DISCOUNT = 0.99
 ALPHA = 0.1

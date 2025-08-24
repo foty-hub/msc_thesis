@@ -1,13 +1,14 @@
 # %%
+import os
+from pathlib import Path
+from typing import Literal
+
+import gymnasium as gym
 import torch
 import torch.nn.functional as F
-from stable_baselines3 import DQN
-import os
-from typing import Literal
-import gymnasium as gym
-from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 import yaml
-from pathlib import Path
+from stable_baselines3 import DQN
+from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
 
 class CQLDQN(DQN):
@@ -142,8 +143,8 @@ def learn_cqldqn_policy(
 
 # %%
 def main():
-    import numpy as np
     import gymnasium as gym
+    import numpy as np
     from stable_baselines3.common.evaluation import evaluate_policy
 
     dqn_args = {
