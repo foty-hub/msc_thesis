@@ -29,8 +29,10 @@ ALPHA = 0.1                 # Conformal prediction miscoverage level
 MIN_CALIB = 50              # Minimum threshold for a calibration set to be leveraged
 NUM_EXPERIMENTS = 25
 NUM_EVAL_EPISODES=250
-N_CALIB_TRANSITIONS=50_000
-N_TRAIN_EPISODES = 50_000
+N_CALIB_TRANSITIONS=10_000
+N_TRAIN_EPISODES = 120_000
+k = 25
+
 
 # data = np.column_stack([s['vals'] for s in stats])
 # %%
@@ -230,10 +232,8 @@ def _clip_scores(score_clip_level, scores):
 
 # %%
 # param_name, param_vals = 'LINK_LENGTH_1', np.linspace(0.5, 2.0, 16), -500
-k = 100
 score_clip_level = 0.01
 MAX_DIST_QUANTILE = 0.99
-N_CALIB_TRANSITIONS = 50_000
 alpha=0.1
 env_name = 'LunarLander-v3'
 param_name, param_vals, min_return = "gravity", np.arange(-12, -0, 0.5), 0
@@ -241,7 +241,8 @@ param_name, param_vals, min_return = "gravity", np.arange(-12, -0, 0.5), 0
 # good_seeds = [0, 1, 2, 3, 4, 7, 8, 9] # acrobot
 # good_seeds = [1, 3, 5, 6, 7, 9] # cartpole
 # good_seeds = [0, 6, 7] # LunarLander
-good_seeds = [7]
+# good_seeds = [0, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+good_seeds = range(25)
 
 # good_seeds = list(range(10))
 
@@ -279,11 +280,9 @@ for seed in good_seeds:
 # plt.plot(param_vals, conf_returns.mean(axis=1) / noconf_returns.mean(axis=1), marker='o')
 # plt.grid(linestyle='--', alpha=0.3)
 # %%
-# TODO: standard scale features
 
 conf = np.array([r['conf_returns']for r in all_seed_results])
 noconf = np.array([r['noconf_returns']for r in all_seed_results])
-# %%
 conf_plots = plt.plot(param_vals, conf.mean(axis=2).T, marker='o')
 plt.legend()
 plt.show()
@@ -291,13 +290,16 @@ plt.show()
 print('seed, no conf, w/ conf')
 for i, seed in enumerate(good_seeds):
     print(f'   {seed}:   {noconf[i].mean():.1f}    {conf[i].mean():.1f}')
-good_seeds = (noconf[:, 3, :].mean(axis=1) > 200).nonzero()[0]
-good_seeds = [int(s) for s in good_seeds]
-avg_perf = (conf[good_seeds].mean(2) / noconf[good_seeds].mean(2)).mean(1).mean()
+good_seeds_perf = (noconf[:, 4, :].mean(axis=1) > 200).nonzero()[0]
+good_seeds_perf = [int(s) for s in good_seeds_perf]
+avg_perf = (conf[good_seeds_perf].mean(2) / noconf[good_seeds_perf].mean(2)).mean(1).mean()
 print(f'{avg_perf:.3f}x improvement')
 # %%
 import pickle
-with open(f'kernel_results_{env_name}.pkl', 'wb') as f:
+import os
+results_dir = f'results/{env_name}_nn'
+os.makedirs(results_dir)
+with open(f'{results_dir}/kernel_results_{env_name}.pkl', 'wb') as f:
     pickle.dump(all_seed_results, f)
 
 # %%
@@ -309,6 +311,7 @@ for i, seed in enumerate(good_seeds):
     plt.legend()
     plt.grid()
     plt.title(f'Seed: {seed}')
+    plt.savefig(f'{results_dir}/run_{seed}.pdf')
     plt.show()
 
 
