@@ -1,15 +1,19 @@
 # %%
 import os
 import pickle
+import pprint
 from dataclasses import dataclass
-from typing import Callable, Literal, Sequence
+from typing import Callable, Sequence
 
 import gymnasium as gym
 import matplotlib.pyplot as plt
 import numpy as np
+import yaml
+from ccnn import calibrate_ccnn, run_ccnn_experiment
 from stable_baselines3 import DQN
 from tqdm import tqdm
 
+from crl.cons._type import AgentTypes, ClassicControl, ScoringMethod
 from crl.cons.agents import learn_cqldqn_policy, learn_ddqn_policy, learn_dqn_policy
 from crl.cons.calib import (
     collect_transitions,
@@ -29,10 +33,16 @@ CQL_ALPHA = 1.0
 MIN_CALIB = 50              # Minimum threshold for a calibration set to be leveraged
 NUM_EXPERIMENTS = 25
 NUM_EVAL_EPISODES=250
-N_CALIB_TRANSITIONS=1_000
-N_TRAIN_EPISODES = 50_000
-USE_MC_RETURN_SCORE = True
+N_CALIB_STEPS=10_000
+N_TRAIN_STEPS = 50_000
+K = 50
+SCORING_METHOD: ScoringMethod = 'td'
+AGENT_TYPE: AgentTypes = 'vanilla'
+SCORE_FN = signed_score
+RETRAIN = True
 
+
+# fmt: on
 @dataclass
 class ExperimentParams:
     env_name: str
@@ -43,14 +53,6 @@ class ExperimentParams:
     success_threshold: int = 0
     good_seeds: list[int] | None = None
 
-
-# EXPERIMENTS = [
-#     ExperimentParams("CartPole-v1", "length", np.linspace(0.1, 2.0, 20), [6] * 4, 0.5),
-#     ExperimentParams("Acrobot-v1", "LINK_LENGTH_1", np.linspace(0.5, 2.0, 16), [6] * 6, 1.0),
-#     # ExperimentParams("Acrobot-v1", "LINK_MASS_2", np.linspace(0.5, 2.0, 16), [4] * 6, 1.0),
-#     ExperimentParams("MountainCar-v0", "gravity", np.linspace(0.0015, 0.0040, 21), [6] * 2, 9.8)
-# ]
-# fmt: on
 
 EVAL_PARAMETERS = {
     # CartPole: vary pole length around nominal 0.5 value
@@ -170,62 +172,42 @@ def run_shift_experiment(
     return exp_result
 
 
-ModelTypes = Literal["vanilla", "cql", "ddqn"]
-
-
 def run_single_seed_experiment(
-    env_name: str, seed: int, model_type: ModelTypes = "vanilla"
+    env_name: str,
+    seed: int,
+    agent_type: AgentTypes = "vanilla",
+    score_fn: Callable = signed_score,
 ):
     # train the nominal policy
-    if model_type == "cql":
-        model, vec_env = learn_cqldqn_policy(
-            env_name=env_name,
-            seed=seed,
-            total_timesteps=N_TRAIN_EPISODES,
-            cql_alpha=CQL_ALPHA,
-        )
-    elif model_type == "ddqn":
-        model, vec_env = learn_ddqn_policy(
-            env_name=env_name,
-            seed=seed,
-            total_timesteps=N_TRAIN_EPISODES,
-        )
-
-    elif model_type == "vanilla":
-        model, vec_env = learn_dqn_policy(
-            env_name=env_name,
-            seed=seed,
-            total_timesteps=N_TRAIN_EPISODES,
-        )
-    else:
-        raise ValueError(f"{model_type=} not recognised. Should be one of {ModelTypes}")
+    model, vec_env = train_agent(env_name, seed, agent_type)
     # discretise the space and collect observations for the calibration sets
     param, param_values, tiles, tilings = EVAL_PARAMETERS[env_name]
-    # discretise, n_discrete_states = build_tiling(model, vec_env, state_bins=state_bins)
-    discretise, n_discrete_states = build_tile_coding(
-        model, vec_env, tiles=tiles, tilings=tilings
-    )
-    buffer = collect_transitions(model, vec_env, n_transitions=N_CALIB_TRANSITIONS)
-    if not USE_MC_RETURN_SCORE:
+    discretise, n_features = build_tile_coding(model, vec_env, tiles, tilings)
+    buffer = collect_transitions(model, vec_env, n_transitions=N_CALIB_STEPS)
+    if SCORING_METHOD == "td":
         calib_sets = fill_calib_sets(
             model,
             buffer,
             discretise,
-            n_discrete_states,
-            score=signed_score,
+            n_features,
+            score=score_fn,
         )
-    else:
+    elif SCORING_METHOD == "monte_carlo":
         calib_sets = fill_calib_sets_mc(
             model,
             buffer,
             discretise,
-            n_discrete_states,
-            score=signed_score,
+            n_features,
+            score=score_fn,
         )
     qhats, visits = compute_corrections(
         calib_sets,
         alpha=ALPHA,
         min_calib=MIN_CALIB,
+    )
+
+    ccnn_scores, scaler, tree, max_dist = calibrate_ccnn(
+        model, buffer, k=K, score_fn=score_fn, scoring_method=SCORING_METHOD
     )
 
     # Test agent on shifted environments
@@ -234,24 +216,64 @@ def run_single_seed_experiment(
     for param_val in (pbar := tqdm(param_values)):
         pbar.set_description(f"{param}={param_val:.1f}")
         eval_parameters = {param: param_val}
-        results.append(
-            run_shift_experiment(
-                model,
-                qhats,
-                visits,
-                discretise,
-                shift_params=eval_parameters,
-                env_name=env_name,
-                num_eps=NUM_EVAL_EPISODES,
-            )
+        disc_results = run_shift_experiment(
+            model,
+            qhats,
+            visits,
+            discretise,
+            shift_params=eval_parameters,
+            env_name=env_name,
+            num_eps=NUM_EVAL_EPISODES,
         )
 
+        ccnn_results = run_ccnn_experiment(
+            model,
+            alpha=ALPHA,
+            k=K,
+            ccnn_scores=ccnn_scores,
+            tree=tree,
+            scaler=scaler,
+            max_dist=max_dist,
+            param=param,
+            param_val=param_val,
+        )
+        disc_results.update(ccnn_results)
+        results.append(disc_results)
+
     return results
+
+
+def train_agent(env_name: ClassicControl, seed: int, agent_type: AgentTypes):
+    if agent_type == "cql":
+        model, vec_env = learn_cqldqn_policy(
+            env_name=env_name,
+            seed=seed,
+            total_timesteps=N_TRAIN_STEPS,
+            cql_alpha=CQL_ALPHA,
+        )
+    elif agent_type == "ddqn":
+        model, vec_env = learn_ddqn_policy(
+            env_name=env_name,
+            seed=seed,
+            total_timesteps=N_TRAIN_STEPS,
+        )
+
+    elif agent_type == "vanilla":
+        model, vec_env = learn_dqn_policy(
+            env_name=env_name,
+            seed=seed,
+            total_timesteps=N_TRAIN_STEPS,
+            train_from_scratch=RETRAIN,
+        )
+    else:
+        raise ValueError(f"{agent_type=} not recognised. Should be one of {AgentTypes}")
+    return model, vec_env
 
 
 def plot_robustness(seed: int, results: list[dict], env_name: str):
     conf_returns = np.array([res["returns_conf"] for res in results])
     noconf_returns = np.array([res["returns_noconf"] for res in results])
+    ccnn_returns = np.array([res["returns_ccnn"] for res in results])
     x_key = EVAL_PARAMETERS[env_name][0]
     xvals = np.array([res[x_key] for res in results])
 
@@ -265,7 +287,7 @@ def plot_robustness(seed: int, results: list[dict], env_name: str):
         marker="o",
         linestyle="-",
         capsize=4,
-        label="Conformalised",
+        label="Calibrated (Discrete)",
     )
 
     # Non-conformalised returns
@@ -278,7 +300,20 @@ def plot_robustness(seed: int, results: list[dict], env_name: str):
         marker="o",
         linestyle="-",
         capsize=4,
-        label="Non-conformalised",
+        label="Uncalibrated",
+    )
+
+    # Non-conformalised returns
+    mean_ccnn = ccnn_returns.mean(axis=1)
+    se_ccnn = ccnn_returns.std(axis=1) / np.sqrt(NUM_EVAL_EPISODES)
+    plt.errorbar(
+        xvals,
+        mean_ccnn,
+        yerr=se_ccnn,
+        marker="o",
+        linestyle="-",
+        capsize=4,
+        label="Calibrated (NN)",
     )
 
     plt.ylabel("Episodic Return")
@@ -290,10 +325,7 @@ def plot_robustness(seed: int, results: list[dict], env_name: str):
     despine(plt.gca())
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.legend(frameon=False)
-    exp_dir = f"results/{env_name}"
-    os.makedirs(exp_dir, exist_ok=True)
-    plt.savefig(f"{exp_dir}/robustness_experiment_{seed}.png")
-    os.makedirs(exp_dir, exist_ok=True)
+    plt.savefig(f"results/{env_name}/robustness_experiment_{seed}.png")
     plt.close()
 
 
@@ -329,16 +361,40 @@ def plot_occupancy_histograms(single_exp_result, env_name, seed):
 # %%
 def main(env_name: str):
     all_results = []
-    # cql_loss_weight = 1.0
-    cql_loss_weight = None
+    agent_type: AgentTypes = "vanilla"
+    experiment_info = {
+        "env": env_name,
+        "agent_type": agent_type,
+        "alpha": ALPHA,
+        "disc_mincalib": MIN_CALIB,
+        "n_train_steps": N_TRAIN_STEPS,
+        "n_calib_steps": N_CALIB_STEPS,
+        "n_eval_episodes": NUM_EVAL_EPISODES,
+        "score_fn": SCORE_FN.__name__,
+        "scoring_method": SCORING_METHOD,
+        "ccnn_k": K,
+        "disc_tiles": EVAL_PARAMETERS[env_name][2],
+        "disc_tilings": EVAL_PARAMETERS[env_name][3],
+        "cql_alpha": CQL_ALPHA if agent_type == "cql" else None,
+    }
 
-    # for seed in [5]:
+    exp_dir = f"results/{env_name}"
+    os.makedirs(exp_dir, exist_ok=True)
+
+    # Pretty print config at start
+    print("Experiment Configuration:")
+    pprint.pprint(experiment_info, sort_dicts=False)
+
+    # Save config to YAML
+    yaml_path = os.path.join(exp_dir, "experiment_config.yaml")
+    with open(yaml_path, "w") as f:
+        yaml.safe_dump(experiment_info, f, sort_keys=False)
+
     for seed in range(NUM_EXPERIMENTS):
         single_exp_result = run_single_seed_experiment(
-            env_name=env_name, seed=seed, cql_loss_weight=cql_loss_weight
+            env_name=env_name, seed=seed, agent_type=agent_type, score_fn=SCORE_FN
         )
         plot_robustness(seed, single_exp_result, env_name)
-        # plot_occupancy_histograms(single_exp_result, env_name, seed)
         all_results.append({"seed": seed, "results": single_exp_result})
         with open(f"results/{env_name}/robustness_experiment.pkl", "wb") as f:
             pickle.dump(all_results, f)
@@ -350,9 +406,11 @@ if __name__ == "__main__":
     # envs = ["CartPole-v1", "Acrobot-v1", "MountainCar-v0"]
     env = "CartPole-v1"
     if env == "MountainCar-v0":
-        assert N_TRAIN_EPISODES == 120_000
+        assert N_TRAIN_STEPS == 120_000
     elif env == "Acrobot-v1":
-        assert N_TRAIN_EPISODES == 100_000
+        assert N_TRAIN_STEPS == 100_000
+    elif env == "CartPole-v1":
+        assert N_TRAIN_STEPS == 50_000
     results = main(env)
 # %%
 
