@@ -103,8 +103,8 @@ def run_ccnn_eval(
                 # Scale the feature before NN search
                 sa_feature = scaler.transform(sa_feature)
                 dists, ids = tree.query(sa_feature, k=k)
-                if np.max(dists) > max_dist:  # too far, anomalous
-                    correction = fallback_value
+                if (sa_maxdist := np.max(dists)) > max_dist:  # too far, anomalous
+                    correction = fallback_value * np.maximum(1.0, sa_maxdist)
                 else:
                     neighbour_scores = scores[ids]
                     correction = _compute_correction(neighbour_scores, alpha=alpha)
@@ -124,6 +124,7 @@ def run_ccnn_eval(
 
 def run_ccnn_experiment(
     model: DQN,
+    env_name: str,
     alpha: float,
     k: int,
     ccnn_scores,
@@ -132,28 +133,20 @@ def run_ccnn_experiment(
     max_dist,
     param: str,
     param_val: float,
-    max_distance_quantile: float = 0.99,
-    score_clip_level: float = 0.01,
+    num_eps: int,
 ) -> dict[str, Any]:
-    # scores, scaler, tree, max_dist = calibrate_ccnn(
-    #     model=model,
-    #     buffer=buffer,
-    #     k=k,
-    #     max_distance_quantile=max_distance_quantile,
-    #     score_clip_level=score_clip_level,
-    #     score_fn=score_fn,
-    # )
-
     ccnn_results = run_single_seed_ccnn_experiment(
-        alpha=alpha,
         model=model,
+        env_name=env_name,
         k=k,
+        alpha=alpha,
         scores=ccnn_scores,
         tree=tree,
         scaler=scaler,
         max_dist=max_dist,
         param_name=param,
         param_val=param_val,
+        num_eps=num_eps,
     )
     return {"returns_ccnn": ccnn_results}
 
@@ -185,8 +178,9 @@ def calibrate_ccnn(
 
 
 def run_single_seed_ccnn_experiment(
-    alpha: float,
     model: DQN,
+    env_name: str,
+    alpha: float,
     k: int,
     scores: np.ndarray,
     tree: KDTree,
@@ -196,20 +190,18 @@ def run_single_seed_ccnn_experiment(
     param_val: float,
     num_eps: int,
 ) -> list[float]:
-    env_name = model.get_env().unwrapped.spec.id
     eval_vec_env = instantiate_eval_env(env_name=env_name, **{param_name: param_val})
 
     ccnn_returns = run_ccnn_eval(
-        model,
-        num_eps,
-        eval_vec_env,
-        scores,
-        tree,
-        scaler,
-        k,
-        max_dist,
-        alpha,
+        model=model,
+        num_eps=num_eps,
         ep_env=eval_vec_env,
+        scores=scores,
+        tree=tree,
+        scaler=scaler,
+        k=k,
+        max_dist=max_dist,
+        alpha=alpha,
     )
     return ccnn_returns
 
