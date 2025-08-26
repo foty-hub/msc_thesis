@@ -2,6 +2,7 @@
 import os
 import pickle
 import pprint
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Callable, Literal, Sequence
 
@@ -383,15 +384,30 @@ def main(env_name: str):
     with open(yaml_path, "w") as f:
         yaml.safe_dump(experiment_info, f, sort_keys=False)
 
-    for seed in range(NUM_EXPERIMENTS):
-        # for seed in [8, 15]:
-        single_exp_result = run_single_seed_experiment(
-            env_name=env_name, seed=seed, agent_type=AGENT_TYPE, score_fn=SCORE_FN
-        )
-        plot_robustness(seed, single_exp_result, env_name)
-        all_results.append({"seed": seed, "results": single_exp_result})
-        with open(f"results/{env_name}/robustness_experiment.pkl", "wb") as f:
-            pickle.dump(all_results, f)
+    seeds = list(range(NUM_EXPERIMENTS))
+    max_workers = min(NUM_EXPERIMENTS, os.cpu_count() or 1)
+
+    with ProcessPoolExecutor(max_workers=max_workers) as ex:
+        future_to_seed = {
+            ex.submit(
+                run_single_seed_experiment,
+                env_name,
+                seed,
+                AGENT_TYPE,
+                SCORE_FN,
+            ): seed
+            for seed in seeds
+        }
+
+        for future in as_completed(future_to_seed):
+            seed = future_to_seed[future]
+            single_exp_result = future.result()
+            # Plot per-seed robustness in the main process to avoid conflicts
+            plot_robustness(seed, single_exp_result, env_name)
+            all_results.append({"seed": seed, "results": single_exp_result})
+            # Persist incrementally as results arrive
+            with open(f"results/{env_name}/robustness_experiment.pkl", "wb") as f:
+                pickle.dump(all_results, f)
 
     return all_results
 
