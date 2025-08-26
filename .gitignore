@@ -22,5 +22,6 @@ wandb/
 # Ignore CartPole experimental results and lunar lander pdf images
 results/**/*.png
 results/**/*.pkl
+results/**/*.yaml
 models/
 results/lunarlander/**/*.pdf
