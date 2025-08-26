@@ -100,7 +100,7 @@ def instantiate_cql_dqn(
     env = gym.make(env_name, render_mode="rgb_array")
 
     # using SB3 zoo suggested hyperparameters (path relative to this file)
-    config_path = Path(__file__).resolve().parent / "configs" / f"{env_name}.yml"
+    config_path = Path(__file__).resolve().parent / ".." / "configs" / f"{env_name}.yml"
     with open(config_path, "r") as f:
         dqn_args = yaml.safe_load(f)
 
