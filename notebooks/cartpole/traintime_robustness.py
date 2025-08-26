@@ -3,7 +3,7 @@ import os
 import pickle
 import pprint
 from dataclasses import dataclass
-from typing import Callable, Sequence
+from typing import Callable, Literal, Sequence
 
 import gymnasium as gym
 import matplotlib.pyplot as plt
@@ -34,12 +34,15 @@ MIN_CALIB = 50              # Minimum threshold for a calibration set to be leve
 NUM_EXPERIMENTS = 25
 NUM_EVAL_EPISODES=250
 N_CALIB_STEPS=10_000
-N_TRAIN_STEPS = 50_000
+N_TRAIN_STEPS = 100_000
 K = 50
 SCORING_METHOD: ScoringMethod = 'td'
-AGENT_TYPE: AgentTypes = 'vanilla'
+AGENT_TYPE: AgentTypes = 'cql'
 SCORE_FN = signed_score
-RETRAIN = True
+RETRAIN = False
+CalibMethods = Literal['nocalib', 'ccdisc', 'ccnn']
+CALIB_METHODS: list[CalibMethods] = ['nocalib', 'ccdisc', 'ccnn']
+CCNN_MAX_DISTANCE_QUANTILE = 0.9
 
 
 # fmt: on
@@ -56,11 +59,10 @@ class ExperimentParams:
 
 EVAL_PARAMETERS = {
     # CartPole: vary pole length around nominal 0.5 value
-    "CartPole-v1": ("length", np.arange(0.1, 3.1, 0.2), 6, 1),
+    # "CartPole-v1": ("length", np.arange(0.1, 3.1, 0.2), 6, 1),
+    "CartPole-v1": ("length", np.arange(0.1, 5.1, 0.4), 6, 1),
     # Acrobot: vary link 1 length (0.5x–2.0x of default 1.0)
     "Acrobot-v1": ("LINK_LENGTH_1", np.linspace(0.5, 2.0, 16), 6, 1),
-    # "Acrobot-v1": ("LINK_MASS_1", np.linspace(0.5, 2.0, 16), [4] * 6),
-    # "Acrobot-v1": ("LINK_MOI", np.arange(0.5, 2.1, 0.1), 8, 1),
     # MountainCar: vary gravity around default 0.0025
     "MountainCar-v0": ("gravity", np.arange(0.001, 0.005 + 0.00025, 0.00025), 10, 1),
     "LunarLander-v3": ("gravity", np.arange(-12, -0, 0.5), 4, 4),
@@ -207,7 +209,12 @@ def run_single_seed_experiment(
     )
 
     ccnn_scores, scaler, tree, max_dist = calibrate_ccnn(
-        model, buffer, k=K, score_fn=score_fn, scoring_method=SCORING_METHOD
+        model,
+        buffer,
+        k=K,
+        score_fn=score_fn,
+        scoring_method=SCORING_METHOD,
+        max_distance_quantile=CCNN_MAX_DISTANCE_QUANTILE,
     )
 
     # Test agent on shifted environments
@@ -228,6 +235,7 @@ def run_single_seed_experiment(
 
         ccnn_results = run_ccnn_experiment(
             model,
+            env_name=env_name,
             alpha=ALPHA,
             k=K,
             ccnn_scores=ccnn_scores,
@@ -236,6 +244,7 @@ def run_single_seed_experiment(
             max_dist=max_dist,
             param=param,
             param_val=param_val,
+            num_eps=NUM_EVAL_EPISODES,
         )
         disc_results.update(ccnn_results)
         results.append(disc_results)
@@ -270,51 +279,35 @@ def train_agent(env_name: ClassicControl, seed: int, agent_type: AgentTypes):
     return model, vec_env
 
 
+["nocalib", "ccdisc", "ccnn"]
+plot_params = {
+    "nocalib": {"key": "returns_noconf", "label": "Uncalibrated", "c": "tab:orange"},
+    "ccdisc": {"key": "returns_conf", "label": "Calibrated (Disc)", "c": "tab:blue"},
+    "ccnn": {"key": "returns_ccnn", "label": "Calibrated (NN)", "c": "tab:green"},
+}
+
+
 def plot_robustness(seed: int, results: list[dict], env_name: str):
-    conf_returns = np.array([res["returns_conf"] for res in results])
-    noconf_returns = np.array([res["returns_noconf"] for res in results])
-    ccnn_returns = np.array([res["returns_ccnn"] for res in results])
     x_key = EVAL_PARAMETERS[env_name][0]
     xvals = np.array([res[x_key] for res in results])
 
-    # Conformalised returns
-    mean_conf = conf_returns.mean(axis=1)
-    se_conf = conf_returns.std(axis=1) / np.sqrt(NUM_EVAL_EPISODES)
-    plt.errorbar(
-        xvals,
-        mean_conf,
-        yerr=se_conf,
-        marker="o",
-        linestyle="-",
-        capsize=4,
-        label="Calibrated (Discrete)",
-    )
-
-    # Non-conformalised returns
-    mean_no = noconf_returns.mean(axis=1)
-    se_no = noconf_returns.std(axis=1) / np.sqrt(NUM_EVAL_EPISODES)
-    plt.errorbar(
-        xvals,
-        mean_no,
-        yerr=se_no,
-        marker="o",
-        linestyle="-",
-        capsize=4,
-        label="Uncalibrated",
-    )
-
-    # Non-conformalised returns
-    mean_ccnn = ccnn_returns.mean(axis=1)
-    se_ccnn = ccnn_returns.std(axis=1) / np.sqrt(NUM_EVAL_EPISODES)
-    plt.errorbar(
-        xvals,
-        mean_ccnn,
-        yerr=se_ccnn,
-        marker="o",
-        linestyle="-",
-        capsize=4,
-        label="Calibrated (NN)",
-    )
+    for calib_method in CALIB_METHODS:
+        key = plot_params[calib_method]["key"]
+        label = plot_params[calib_method]["label"]
+        colour = plot_params[calib_method]["c"]
+        returns = np.array([res[key] for res in results])
+        mean = returns.mean(axis=1)
+        se = returns.std(axis=1) / np.sqrt(NUM_EVAL_EPISODES)
+        plt.errorbar(
+            xvals,
+            mean,
+            yerr=se,
+            marker="o",
+            linestyle="-",
+            capsize=4,
+            label=label,
+            c=colour,
+        )
 
     plt.ylabel("Episodic Return")
     plt.xlabel(x_key)
@@ -355,16 +348,14 @@ def plot_occupancy_histograms(single_exp_result, env_name, seed):
         despine(plt.gca())
         plt.savefig(f"{exp_dir}/hist_{param_val.replace('.', '-')}.png")
         plt.close()
-        # plt.show()
 
 
 # %%
 def main(env_name: str):
     all_results = []
-    agent_type: AgentTypes = "vanilla"
     experiment_info = {
         "env": env_name,
-        "agent_type": agent_type,
+        "agent_type": AGENT_TYPE,
         "alpha": ALPHA,
         "disc_mincalib": MIN_CALIB,
         "n_train_steps": N_TRAIN_STEPS,
@@ -373,9 +364,11 @@ def main(env_name: str):
         "score_fn": SCORE_FN.__name__,
         "scoring_method": SCORING_METHOD,
         "ccnn_k": K,
+        "ccnn_max_distance_quantile": CCNN_MAX_DISTANCE_QUANTILE,
         "disc_tiles": EVAL_PARAMETERS[env_name][2],
         "disc_tilings": EVAL_PARAMETERS[env_name][3],
-        "cql_alpha": CQL_ALPHA if agent_type == "cql" else None,
+        "cql_alpha": CQL_ALPHA if AGENT_TYPE == "cql" else None,
+        "calib_methods": CALIB_METHODS,
     }
 
     exp_dir = f"results/{env_name}"
@@ -391,8 +384,9 @@ def main(env_name: str):
         yaml.safe_dump(experiment_info, f, sort_keys=False)
 
     for seed in range(NUM_EXPERIMENTS):
+        # for seed in [8, 15]:
         single_exp_result = run_single_seed_experiment(
-            env_name=env_name, seed=seed, agent_type=agent_type, score_fn=SCORE_FN
+            env_name=env_name, seed=seed, agent_type=AGENT_TYPE, score_fn=SCORE_FN
         )
         plot_robustness(seed, single_exp_result, env_name)
         all_results.append({"seed": seed, "results": single_exp_result})
@@ -410,27 +404,7 @@ if __name__ == "__main__":
     elif env == "Acrobot-v1":
         assert N_TRAIN_STEPS == 100_000
     elif env == "CartPole-v1":
-        assert N_TRAIN_STEPS == 50_000
-    results = main(env)
-# %%
-
-# # plot mean occupancy line chart
-# exp_results = results[0]["results"]
-# for conf in ["visits_conf", "visits_noconf"]:
-#     mean_occupancies = []
-#     for ix in range(len(exp_results)):
-#         nominal_visits = exp_results[ix][conf]
-#         visits = []
-#         for ep in range(len(nominal_visits)):
-#             visits.extend(nominal_visits[ep])
-#         mean_occupancy = np.mean(visits)
-#         mean_occupancies.append(mean_occupancy)
-
-#     plt.plot(EVAL_PARAMETERS[env][1], mean_occupancies, marker="o", label=conf)
-# plt.legend()
-# plt.title("Occupancy rates")
-# plt.grid(linestyle="--", alpha=0.3)
-# despine(plt.gca())
-# plt.show()
+        assert N_TRAIN_STEPS in [50_000, 100_000]
+    main(env_name=env)
 
 # %%
