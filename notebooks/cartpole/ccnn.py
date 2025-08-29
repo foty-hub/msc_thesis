@@ -71,6 +71,89 @@ def compute_nn_scores(
     return scores, features, scaler
 
 
+def _compute_mc_returns(buffer: ReplayBuffer, gamma: float) -> np.ndarray:
+    """Compute discounted Monte Carlo returns G_t for every transition in a
+    chronological buffer. Episodes are delimited by `transition.done` and are
+    treated as terminal (no bootstrap beyond terminal).
+
+    Assumes the buffer is full and ordered chronologically.
+    """
+    transitions = list(buffer)
+    n = len(transitions)
+    returns = np.zeros(n, dtype=float)
+
+    G = 0.0
+    # Backward pass to accumulate discounted returns, resetting at terminals
+    for i in range(n - 1, -1, -1):
+        tr = transitions[i]
+        r = float(np.asarray(tr.reward).squeeze())
+        if tr.done:
+            G = r
+        else:
+            G = r + gamma * G
+        returns[i] = G
+
+    return returns
+
+
+def compute_nn_scores_mc(
+    model: DQN,
+    buffer: ReplayBuffer,
+    score_fn: Callable,
+    scoring_method: str,
+):
+    """Compute nearest-neighbour features and scores using Monte Carlo returns.
+
+    The score is defined via the provided `score_fn` as
+        score_fn(Q_theta(s, a), G_t),
+    where G_t is the discounted Monte Carlo return from this time step until
+    episode termination, with discount factor taken from `model.gamma`.
+
+    Returns
+    -------
+    scores : np.ndarray of shape (n_samples,)
+        Nonconformity scores per (s, a) time step.
+    features : np.ndarray of shape (n_samples, obs_dim + 1)
+        Concatenated [state || action] features.
+    scaler : StandardScaler
+        Fitted scaler for the features.
+    """
+    if scoring_method != "mc":
+        raise NotImplementedError("compute_nn_scores_mc expects scoring_method='mc'")
+
+    vec_env = model.get_env()
+    n_samples = buffer.capacity
+    scores = np.zeros(n_samples)
+    n_features = vec_env.observation_space.shape[0] + 1
+    features = np.zeros((n_samples, n_features))
+
+    # Precompute discounted MC returns aligned with buffer indices
+    returns = _compute_mc_returns(buffer, gamma=float(model.gamma))
+
+    # We need random access to returns by index; align enumeration with buffer order
+    for ix, transition in enumerate(buffer):
+        with torch.no_grad():
+            q_pred = model.q_net(model.policy.obs_to_tensor(transition.state)[0])
+            y_pred = q_pred[0, transition.action]
+
+        y_true = returns[ix]
+        score = score_fn(y_pred, y_true)
+
+        state, action = transition.state, transition.action
+        sa_feature = np.concatenate(
+            [np.asarray(state).flatten(), np.asarray(action).flatten()]
+        )
+
+        scores[ix] = np.asarray(score).squeeze()
+        features[ix] = sa_feature
+
+    # Fit scaler on features and transform them
+    scaler = StandardScaler()
+    features = scaler.fit_transform(features)
+
+    return scores, features, scaler
+
+
 def run_ccnn_eval(
     model: DQN,
     num_eps: int,
@@ -104,7 +187,7 @@ def run_ccnn_eval(
                 sa_feature = scaler.transform(sa_feature)
                 dists, ids = tree.query(sa_feature, k=k)
                 if (sa_maxdist := np.max(dists)) > max_dist:  # too far, anomalous
-                    correction = fallback_value * np.maximum(1.0, sa_maxdist)
+                    correction = fallback_value  # * np.maximum(1.0, sa_maxdist)
                 else:
                     neighbour_scores = scores[ids]
                     correction = _compute_correction(neighbour_scores, alpha=alpha)
