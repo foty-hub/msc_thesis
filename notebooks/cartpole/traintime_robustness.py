@@ -4,7 +4,7 @@ import pickle
 import pprint
 import warnings
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
 import gymnasium as gym
@@ -38,16 +38,42 @@ ALPHA_NN = 0.1              # Conformal prediction miscoverage level (nearest ne
 CQL_ALPHA = 0.05
 MIN_CALIB = 50              # Minimum threshold for a calibration set to be leveraged
 NUM_EXPERIMENTS = 25
-NUM_EVAL_EPISODES=250
-N_CALIB_STEPS=10_000
-N_TRAIN_STEPS = 120_000
+NUM_EVAL_EPISODES = 250
+N_CALIB_STEPS = 10_000
+N_TRAIN_STEPS = 50_000
 K = 50
-SCORING_METHOD: ScoringMethod = 'monte_carlo'
+SCORING_METHOD: ScoringMethod = 'td'
 AGENT_TYPE: AgentTypes = 'vanilla'
 SCORE_FN = signed_score
 RETRAIN = False
 CALIB_METHODS: list[CalibMethods] = ['nocalib', 'ccdisc', 'ccnn']
 CCNN_MAX_DISTANCE_QUANTILE = 0.9
+
+
+@dataclass
+class RobustnessConfig:
+    """Configuration for robustness experiments.
+
+    This groups all parameters that were previously module-level constants so
+    they can be provided programmatically or via a CLI without relying on
+    implicit globals.
+    """
+
+    alpha_disc: float = ALPHA_DISC
+    alpha_nn: float = ALPHA_NN
+    cql_alpha: float = CQL_ALPHA
+    min_calib: int = MIN_CALIB
+    num_experiments: int = NUM_EXPERIMENTS
+    num_eval_episodes: int = NUM_EVAL_EPISODES
+    n_calib_steps: int = N_CALIB_STEPS
+    n_train_steps: int = N_TRAIN_STEPS
+    k: int = K
+    scoring_method: ScoringMethod = SCORING_METHOD
+    agent_type: AgentTypes = AGENT_TYPE
+    score_fn: Callable = SCORE_FN
+    retrain: bool = RETRAIN
+    calib_methods: list[CalibMethods] = field(default_factory=lambda: CALIB_METHODS.copy())
+    ccnn_max_distance_quantile: float = CCNN_MAX_DISTANCE_QUANTILE
 
 
 # fmt: on
@@ -182,44 +208,44 @@ def run_shift_experiment(
 def run_single_seed_experiment(
     env_name: str,
     seed: int,
-    agent_type: AgentTypes = "vanilla",
-    score_fn: Callable = signed_score,
+    cfg: RobustnessConfig,
 ):
+    """Run one seed's experiment under the provided configuration."""
     # train the nominal policy
-    model, vec_env = train_agent(env_name, seed, agent_type)
+    model, vec_env = train_agent(env_name, seed, cfg)
     # discretise the space and collect observations for the calibration sets
     param, param_values, tiles, tilings = EVAL_PARAMETERS[env_name]
     discretise, n_features = build_tile_coding(model, vec_env, tiles, tilings)
-    buffer = collect_transitions(model, vec_env, n_transitions=N_CALIB_STEPS)
-    if SCORING_METHOD == "td":
+    buffer = collect_transitions(model, vec_env, n_transitions=cfg.n_calib_steps)
+    if cfg.scoring_method == "td":
         calib_sets = fill_calib_sets(
             model,
             buffer,
             discretise,
             n_features,
-            score=score_fn,
+            score=cfg.score_fn,
         )
-    elif SCORING_METHOD == "monte_carlo":
+    elif cfg.scoring_method == "monte_carlo":
         calib_sets = fill_calib_sets_mc(
             model,
             buffer,
             discretise,
             n_features,
-            score=score_fn,
+            score=cfg.score_fn,
         )
     qhats, visits = compute_corrections(
         calib_sets,
-        alpha=ALPHA_DISC,
-        min_calib=MIN_CALIB,
+        alpha=cfg.alpha_disc,
+        min_calib=cfg.min_calib,
     )
 
     ccnn_scores, scaler, tree, max_dist = calibrate_ccnn(
         model,
         buffer,
-        k=K,
-        score_fn=score_fn,
-        scoring_method=SCORING_METHOD,
-        max_distance_quantile=CCNN_MAX_DISTANCE_QUANTILE,
+        k=cfg.k,
+        score_fn=cfg.score_fn,
+        scoring_method=cfg.scoring_method,
+        max_distance_quantile=cfg.ccnn_max_distance_quantile,
     )
 
     # Test agent on shifted environments
@@ -235,21 +261,21 @@ def run_single_seed_experiment(
             discretise,
             shift_params=eval_parameters,
             env_name=env_name,
-            num_eps=NUM_EVAL_EPISODES,
+            num_eps=cfg.num_eval_episodes,
         )
 
         ccnn_results = run_ccnn_experiment(
             model,
             env_name=env_name,
-            alpha=ALPHA_NN,
-            k=K,
+            alpha=cfg.alpha_nn,
+            k=cfg.k,
             ccnn_scores=ccnn_scores,
             tree=tree,
             scaler=scaler,
             max_dist=max_dist,
             param=param,
             param_val=param_val,
-            num_eps=NUM_EVAL_EPISODES,
+            num_eps=cfg.num_eval_episodes,
         )
         disc_results.update(ccnn_results)
         results.append(disc_results)
@@ -257,27 +283,28 @@ def run_single_seed_experiment(
     return results
 
 
-def train_agent(env_name: ClassicControl, seed: int, agent_type: AgentTypes):
+def train_agent(env_name: ClassicControl, seed: int, cfg: RobustnessConfig):
+    agent_type = cfg.agent_type
     if agent_type == "cql":
         model, vec_env = learn_cqldqn_policy(
             env_name=env_name,
             seed=seed,
-            total_timesteps=N_TRAIN_STEPS,
-            cql_alpha=CQL_ALPHA,
+            total_timesteps=cfg.n_train_steps,
+            cql_alpha=cfg.cql_alpha,
         )
     elif agent_type == "ddqn":
         model, vec_env = learn_ddqn_policy(
             env_name=env_name,
             seed=seed,
-            total_timesteps=N_TRAIN_STEPS,
+            total_timesteps=cfg.n_train_steps,
         )
 
     elif agent_type == "vanilla":
         model, vec_env = learn_dqn_policy(
             env_name=env_name,
             seed=seed,
-            total_timesteps=N_TRAIN_STEPS,
-            train_from_scratch=RETRAIN,
+            total_timesteps=cfg.n_train_steps,
+            train_from_scratch=cfg.retrain,
         )
     else:
         raise ValueError(f"{agent_type=} not recognised. Should be one of {AgentTypes}")
@@ -292,17 +319,23 @@ plot_params = {
 }
 
 
-def plot_robustness(seed: int, results: list[dict], env_name: str):
+def plot_robustness(
+    seed: int,
+    results: list[dict],
+    env_name: str,
+    cfg: RobustnessConfig,
+    out_dir: str,
+):
     x_key = EVAL_PARAMETERS[env_name][0]
     xvals = np.array([res[x_key] for res in results])
 
-    for calib_method in CALIB_METHODS:
+    for calib_method in cfg.calib_methods:
         key = plot_params[calib_method]["key"]
         label = plot_params[calib_method]["label"]
         colour = plot_params[calib_method]["c"]
         returns = np.array([res[key] for res in results])
         mean = returns.mean(axis=1)
-        se = returns.std(axis=1) / np.sqrt(NUM_EVAL_EPISODES)
+        se = returns.std(axis=1) / np.sqrt(cfg.num_eval_episodes)
         plt.errorbar(
             xvals,
             mean,
@@ -323,13 +356,17 @@ def plot_robustness(seed: int, results: list[dict], env_name: str):
     despine(plt.gca())
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.legend(frameon=False)
-    plt.savefig(f"results/{env_name}/robustness_experiment_{seed}.png")
+    plt.savefig(os.path.join(out_dir, f"robustness_experiment_{seed}.png"))
     plt.close()
 
 
-def plot_occupancy_histograms(single_exp_result, env_name, seed):
+def plot_occupancy_histograms(
+    single_exp_result, env_name, seed, out_dir: str | None = None
+):
     x_key: str = EVAL_PARAMETERS[env_name][0]
-    exp_dir = f"results/{env_name}/hists_{seed}"
+    if out_dir is None:
+        out_dir = os.path.join("results", env_name)
+    exp_dir = os.path.join(out_dir, f"hists_{seed}")
     os.makedirs(exp_dir, exist_ok=True)
 
     for ix in range(len(single_exp_result)):
@@ -356,28 +393,70 @@ def plot_occupancy_histograms(single_exp_result, env_name, seed):
 
 
 # %%
-def main(env_name: str):
+def main(
+    env_name: str,
+    config: RobustnessConfig | dict | None = None,
+    results_out: str | None = None,
+):
+    """Run robustness experiments for a given environment.
+
+    Parameters
+    - env_name: Gymnasium environment id to evaluate.
+    - config: Either a RobustnessConfig, a plain dict with matching keys, or
+      None to use default values. The configuration captures all parameters that
+      were previously taken from module-level constants.
+    - results_out: Optional name for the results subdirectory under 'results/'.
+      If provided, outputs are written to 'results/{results_out}' instead of
+      'results/{env_name}'.
+    """
+    # Normalise config
+    if config is None:
+        # Build a config from the current module-level globals for backward
+        # compatibility with any code that still mutates these variables.
+        cfg = RobustnessConfig(
+            alpha_disc=ALPHA_DISC,
+            alpha_nn=ALPHA_NN,
+            cql_alpha=CQL_ALPHA,
+            min_calib=MIN_CALIB,
+            num_experiments=NUM_EXPERIMENTS,
+            num_eval_episodes=NUM_EVAL_EPISODES,
+            n_calib_steps=N_CALIB_STEPS,
+            n_train_steps=N_TRAIN_STEPS,
+            k=K,
+            scoring_method=SCORING_METHOD,
+            agent_type=AGENT_TYPE,
+            score_fn=SCORE_FN,
+            retrain=RETRAIN,
+            calib_methods=CALIB_METHODS.copy(),
+            ccnn_max_distance_quantile=CCNN_MAX_DISTANCE_QUANTILE,
+        )
+    elif isinstance(config, dict):
+        cfg = RobustnessConfig(**config)
+    else:
+        cfg = config
+
     all_results = []
     experiment_info = {
         "env": env_name,
-        "agent_type": AGENT_TYPE,
-        "alpha_disc": ALPHA_DISC,
-        "alpha_nn": ALPHA_NN,
-        "disc_mincalib": MIN_CALIB,
-        "n_train_steps": N_TRAIN_STEPS,
-        "n_calib_steps": N_CALIB_STEPS,
-        "n_eval_episodes": NUM_EVAL_EPISODES,
-        "score_fn": SCORE_FN.__name__,
-        "scoring_method": SCORING_METHOD,
-        "ccnn_k": K,
-        "ccnn_max_distance_quantile": CCNN_MAX_DISTANCE_QUANTILE,
+        "agent_type": cfg.agent_type,
+        "alpha_disc": cfg.alpha_disc,
+        "alpha_nn": cfg.alpha_nn,
+        "disc_mincalib": cfg.min_calib,
+        "n_train_steps": cfg.n_train_steps,
+        "n_calib_steps": cfg.n_calib_steps,
+        "n_eval_episodes": cfg.num_eval_episodes,
+        "score_fn": getattr(cfg.score_fn, "__name__", str(cfg.score_fn)),
+        "scoring_method": cfg.scoring_method,
+        "ccnn_k": cfg.k,
+        "ccnn_max_distance_quantile": cfg.ccnn_max_distance_quantile,
         "disc_tiles": EVAL_PARAMETERS[env_name][2],
         "disc_tilings": EVAL_PARAMETERS[env_name][3],
-        "cql_alpha": CQL_ALPHA if AGENT_TYPE == "cql" else None,
-        "calib_methods": CALIB_METHODS,
+        "cql_alpha": cfg.cql_alpha if cfg.agent_type == "cql" else None,
+        "calib_methods": cfg.calib_methods,
     }
 
-    exp_dir = f"results/{env_name}"
+    # Determine results directory (override env_name if results_out provided)
+    exp_dir = os.path.join("results", results_out or env_name)
     os.makedirs(exp_dir, exist_ok=True)
 
     # Pretty print config at start
@@ -389,8 +468,8 @@ def main(env_name: str):
     with open(yaml_path, "w") as f:
         yaml.safe_dump(experiment_info, f, sort_keys=False)
 
-    seeds = list(range(NUM_EXPERIMENTS))
-    max_workers = min(NUM_EXPERIMENTS, os.cpu_count() or 1)
+    seeds = list(range(cfg.num_experiments))
+    max_workers = min(cfg.num_experiments, os.cpu_count() or 1)
 
     with ProcessPoolExecutor(max_workers=max_workers) as ex:
         future_to_seed = {
@@ -398,8 +477,7 @@ def main(env_name: str):
                 run_single_seed_experiment,
                 env_name,
                 seed,
-                AGENT_TYPE,
-                SCORE_FN,
+                cfg,
             ): seed
             for seed in seeds
         }
@@ -408,10 +486,10 @@ def main(env_name: str):
             seed = future_to_seed[future]
             single_exp_result = future.result()
             # Plot per-seed robustness in the main process to avoid conflicts
-            plot_robustness(seed, single_exp_result, env_name)
+            plot_robustness(seed, single_exp_result, env_name, cfg, exp_dir)
             all_results.append({"seed": seed, "results": single_exp_result})
             # Persist incrementally as results arrive
-            with open(f"results/{env_name}/robustness_experiment.pkl", "wb") as f:
+            with open(os.path.join(exp_dir, "robustness_experiment.pkl"), "wb") as f:
                 pickle.dump(all_results, f)
 
     return all_results
@@ -422,12 +500,13 @@ if __name__ == "__main__":
     # env = "CartPole-v1"
     # env = "LunarLander-v3"
     env = "MountainCar-v0"
+    cfg = RobustnessConfig()
     if env == "MountainCar-v0":
-        assert N_TRAIN_STEPS == 120_000
+        assert cfg.n_train_steps == 120_000
     elif env == "Acrobot-v1":
-        assert N_TRAIN_STEPS == 100_000
+        assert cfg.n_train_steps == 100_000
     elif env == "CartPole-v1":
-        assert N_TRAIN_STEPS in [50_000, 100_000]
-    main(env_name=env)
+        assert cfg.n_train_steps in [50_000, 100_000]
+    main(env_name=env, config=cfg)
 
 # %%
