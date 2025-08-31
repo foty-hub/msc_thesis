@@ -34,7 +34,6 @@ from crl.cons.agents import learn_dqn_policy
 from crl.cons.calib import (
     collect_transitions,
     compute_corrections,
-    correction_for,
     fill_calib_sets,
     fill_calib_sets_mc,
     signed_score,
@@ -108,10 +107,20 @@ def _select_action_disc(
     # Determine number of discrete actions
     num_actions = getattr(model.get_env().action_space, "n")
     q_vals = model.q_net(model.policy.obs_to_tensor(obs)[0]).flatten()
-    for a in range(num_actions):
-        # Aggregate per-tile corrections for (s, a) and subtract
-        correction = correction_for(obs, np.array([a]), qhats, discretise, agg="max")
-        q_vals[a] -= correction
+    # Compute per-action corrections in a single batched pass
+    actions = np.arange(num_actions, dtype=int)
+    # n_state_features = total features per action block
+    n_state_features = int(qhats.size // num_actions)
+    corrections = correction_for(
+        obs,
+        actions,
+        qhats,
+        discretise,
+        agg="max",
+        n_state_features=n_state_features,
+    )
+    # Subtract vector of corrections from Q-values
+    q_vals -= torch.as_tensor(corrections, dtype=q_vals.dtype, device=q_vals.device)
     action = q_vals.argmax().numpy().reshape(1)
     return action
 
@@ -125,22 +134,43 @@ def _select_action_ccnn(
     k: int,
     max_dist: float,
     alpha: float,
+    fallback_value: float,
 ) -> np.ndarray:
     num_actions = getattr(model.get_env().action_space, "n")
     q_vals = model.q_net(model.policy.obs_to_tensor(obs)[0]).flatten()
 
-    fallback_value = float(scores.max())
-    flat_obs = obs.flatten()
-    for a in range(num_actions):
-        sa_feature = np.concatenate([flat_obs, np.array([a])]).reshape(1, -1)
-        sa_feature = scaler.transform(sa_feature)
-        dists, ids = tree.query(sa_feature, k=k)
-        if float(np.max(dists)) > max_dist:
-            correction = fallback_value
-        else:
-            neighbour_scores = scores[ids]
-            correction = float(_compute_correction(neighbour_scores, alpha=alpha))
-        q_vals[a] -= correction
+    # Build scaled features for all actions in a single batch without calling transform repeatedly
+    actions = np.arange(num_actions, dtype=int)
+    flat_obs = np.asarray(obs).flatten()
+    means = np.asarray(getattr(scaler, "mean_"))
+    scales = np.asarray(getattr(scaler, "scale_"))
+    state_means, action_mean = means[:-1], means[-1]
+    state_scales, action_scale = scales[:-1], scales[-1]
+    # Scale state once, then tile
+    state_scaled = (flat_obs - state_means) / state_scales
+    obs_rep = np.tile(state_scaled, (num_actions, 1))
+    action_scaled = (actions.astype(float) - action_mean) / action_scale
+    sa_features = np.concatenate([obs_rep, action_scaled.reshape(-1, 1)], axis=1)
+
+    # Query KDTree for all (s,a) at once
+    dists, ids = tree.query(sa_features, k=k)
+
+    # Determine fallback threshold per row
+    row_max_d = np.max(dists, axis=1)
+    far_mask = row_max_d > float(max_dist)
+
+    # Compute per-action corrections from neighbour scores
+    neighbour_scores = scores[ids]  # shape (A, k)
+    # Vectorised 'higher' quantile selection matching _compute_correction
+    j_idx = int(np.ceil((k + 1) * (1 - float(alpha))) - 1)
+    j_idx = max(0, min(k - 1, j_idx))
+    # Use partition for O(k) selection of the j-th order statistic
+    partitioned = np.partition(neighbour_scores, j_idx, axis=1)
+    corrs = partitioned[:, j_idx]
+    # Apply fallback for far queries
+    corrs = np.where(far_mask, fallback_value, corrs)
+    # Subtract corrections vector from q-values
+    q_vals -= torch.as_tensor(corrs, dtype=q_vals.dtype, device=q_vals.device)
     action = q_vals.argmax().numpy().reshape(1)
     return action
 
@@ -197,6 +227,79 @@ def _calibrate_disc(
     return qhats, discretise
 
 
+# =========================
+# Batched discretisation + correction
+# =========================
+def discretise_batched(
+    obs: np.ndarray,
+    actions: np.ndarray,
+    base_discretise: Callable[[np.ndarray, np.ndarray], np.ndarray],
+    *,
+    n_state_features: int,
+) -> np.ndarray:
+    """Return active tile indices for all actions in a single array.
+
+    Parameters
+    - obs: observation array as passed to the base discretiser (possibly with env dim).
+    - actions: array of action indices shape (A,).
+    - base_discretise: function mapping (obs, action[shape (1,)]) -> indices for that action.
+    - n_state_features: number of features for a single action block.
+
+    Returns
+    - idxs: shape (A, T) where T is number of active tiles per state.
+    """
+    # Get base indices once for action 0; action only contributes an offset
+    base_idxs = base_discretise(obs, np.array([0]))
+    base_idxs = np.asarray(base_idxs).reshape(1, -1)
+    actions = np.asarray(actions, dtype=int).reshape(-1, 1)
+    # Broadcast offsets per action block
+    return base_idxs + actions * int(n_state_features)
+
+
+def correction_for(
+    state: np.ndarray,
+    action: np.ndarray,
+    qhats: np.ndarray,
+    discretise: Callable[[np.ndarray, np.ndarray], np.ndarray],
+    *,
+    agg: str,
+    clip_correction: bool = False,
+    n_state_features: int | None = None,
+) -> np.ndarray:
+    """Vectorised correction aggregator for all provided actions.
+
+    For tile coding, the active feature indices for different actions are just
+    offsets of the same base indices; we exploit this to compute all actions at
+    once without a Python loop.
+    """
+    actions = np.asarray(action, dtype=int).reshape(-1)
+    if n_state_features is None:
+        # Infer using size of qhats and the maximum action index + 1
+        # This assumes zero-based contiguous action indices.
+        num_actions = int(actions.max()) + 1
+        n_state_features = int(qhats.size // max(1, num_actions))
+
+    idxs = discretise_batched(
+        state, actions, discretise, n_state_features=int(n_state_features)
+    )
+    # Gather per-tile corrections for each action: shape (A, T)
+    vals = qhats[idxs]
+
+    if agg == "max":
+        corrs = np.max(vals, axis=1)
+    elif agg == "mean":
+        corrs = np.mean(vals, axis=1)
+    elif agg == "median":
+        corrs = np.median(vals, axis=1)
+    else:
+        raise ValueError("Unknown agg. Use 'max', 'mean', or 'median'.")
+
+    if clip_correction:
+        corrs = np.clip(corrs, a_min=0, a_max=None)
+
+    return corrs
+
+
 def _calibrate_ccnn(
     model: DQN,
     vec_env,
@@ -216,7 +319,12 @@ def _calibrate_ccnn(
         scoring_method=scoring_method,
         max_distance_quantile=max_distance_quantile,
     )
-    return scores, scaler, tree, max_dist
+    # Precompute a global fallback correction using the same conformal index,
+    # but across the full calibration score distribution.
+    n = scores.shape[0]
+    q_level = min(1.0, np.ceil((n + 1) * (1 - ALPHA_NN)) / n)
+    fallback = float(np.quantile(scores, q_level, method="higher"))
+    return scores, scaler, tree, max_dist, fallback
 
 
 def main():
@@ -254,14 +362,16 @@ def main():
             score_fn=SCORE_FN,
             n_calib_steps=N_CALIB_STEPS,
         )
-        ccnn_scores, ccnn_scaler, ccnn_tree, ccnn_max_dist = _calibrate_ccnn(
-            model,
-            vec_env,
-            score_fn=SCORE_FN,
-            scoring_method=SCORING_METHOD,
-            n_calib_steps=N_CALIB_STEPS,
-            k=K,
-            max_distance_quantile=CCNN_MAX_DISTANCE_QUANTILE,
+        ccnn_scores, ccnn_scaler, ccnn_tree, ccnn_max_dist, ccnn_fallback = (
+            _calibrate_ccnn(
+                model,
+                vec_env,
+                score_fn=SCORE_FN,
+                scoring_method=SCORING_METHOD,
+                n_calib_steps=N_CALIB_STEPS,
+                k=K,
+                max_distance_quantile=CCNN_MAX_DISTANCE_QUANTILE,
+            )
         )
 
         # Fresh eval env for timing loops
@@ -305,6 +415,7 @@ def main():
                 k=K,
                 max_dist=ccnn_max_dist,
                 alpha=ALPHA_NN,
+                fallback_value=ccnn_fallback,
             ),
             warmup_steps=WARMUP_STEPS_PER_METHOD,
             num_eps=NUM_EVAL_EPISODES,
