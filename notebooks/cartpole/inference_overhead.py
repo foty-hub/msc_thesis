@@ -27,6 +27,7 @@ import yaml
 
 # Relative import of CCNN utilities from this folder
 from ccnn import _compute_correction, calibrate_ccnn
+from sklearn.preprocessing import StandardScaler
 from stable_baselines3 import DQN
 
 from crl.cons._type import ScoringMethod
@@ -45,7 +46,7 @@ from crl.cons.env import instantiate_eval_env
 # Top-level configuration
 # =========================
 ENV_NAME = "CartPole-v1"  # default single env
-RUN_ALL_ENVS = False  # if True, runs for all 4 envs below
+RUN_ALL_ENVS = True  # if True, runs for all 4 envs below
 SEED = 0
 
 # Calibration settings
@@ -84,6 +85,7 @@ class TimingResult:
         return {
             "count": int(arr.size),
             "mean_us": float(arr.mean() / 1e3),
+            "std_us": float(arr.std() / 1e3),
             "median_us": float(np.median(arr) / 1e3),
             "p95_us": float(np.quantile(arr, 0.95) / 1e3),
             "p99_us": float(np.quantile(arr, 0.99) / 1e3),
@@ -103,14 +105,32 @@ def _select_action_disc(
     obs,
     qhats: np.ndarray,
     discretise: Callable,
+    n_state_features: int | None = None,
 ) -> np.ndarray:
-    # Determine number of discrete actions
-    num_actions = getattr(model.get_env().action_space, "n")
-    q_vals = model.q_net(model.policy.obs_to_tensor(obs)[0]).flatten()
-    # Compute per-action corrections in a single batched pass
-    actions = np.arange(num_actions, dtype=int)
-    # n_state_features = total features per action block
-    n_state_features = int(qhats.size // num_actions)
+    # Inference without autograd bookkeeping
+    with torch.no_grad():
+        q_vals = model.q_net(model.policy.obs_to_tensor(obs)[0]).flatten()
+
+    # Derive #actions directly from network output (cheaper than env lookup)
+    num_actions = q_vals.numel()
+
+    # Reuse a cached arange for actions to avoid per-step allocation
+    try:
+        actions = _select_action_disc._A_CACHE[num_actions]  # type: ignore[attr-defined]
+    except AttributeError:
+        _select_action_disc._A_CACHE = {}  # type: ignore[attr-defined]
+        actions = None
+    except KeyError:
+        actions = None
+    if actions is None:
+        actions = np.arange(num_actions, dtype=np.int64)
+        _select_action_disc._A_CACHE[num_actions] = actions  # type: ignore[attr-defined]
+
+    # Compute state block size once if not provided
+    if n_state_features is None:
+        n_state_features = int(qhats.size // num_actions)
+
+    # Vectorised correction over all actions
     corrections = correction_for(
         obs,
         actions,
@@ -119,10 +139,11 @@ def _select_action_disc(
         agg="max",
         n_state_features=n_state_features,
     )
-    # Subtract vector of corrections from Q-values
+
+    # Subtract corrections from Q-values and pick greedy action
     q_vals -= torch.as_tensor(corrections, dtype=q_vals.dtype, device=q_vals.device)
-    action = q_vals.argmax().numpy().reshape(1)
-    return action
+    action_idx = int(torch.argmax(q_vals))
+    return np.array([action_idx], dtype=np.int64)
 
 
 def _select_action_ccnn(
@@ -130,49 +151,56 @@ def _select_action_ccnn(
     obs,
     scores: np.ndarray,
     tree,
-    scaler,
+    scaler: StandardScaler,
     k: int,
+    j_idx: int,
     max_dist: float,
-    alpha: float,
     fallback_value: float,
 ) -> np.ndarray:
+    # Number of discrete actions
     num_actions = getattr(model.get_env().action_space, "n")
-    q_vals = model.q_net(model.policy.obs_to_tensor(obs)[0]).flatten()
 
-    # Build scaled features for all actions in a single batch without calling transform repeatedly
-    actions = np.arange(num_actions, dtype=int)
-    flat_obs = np.asarray(obs).flatten()
-    means = np.asarray(getattr(scaler, "mean_"))
-    scales = np.asarray(getattr(scaler, "scale_"))
+    # Forward pass without autograd bookkeeping
+    with torch.no_grad():
+        q_vals = model.q_net(model.policy.obs_to_tensor(obs)[0]).flatten()
+
+    # Build scaled (s, a) features for all actions with minimal allocations
+    actions = np.arange(num_actions)
+    flat_obs = np.asarray(obs, dtype=np.float64).ravel()
+
+    means = scaler.mean_
+    scales = scaler.scale_
     state_means, action_mean = means[:-1], means[-1]
     state_scales, action_scale = scales[:-1], scales[-1]
-    # Scale state once, then tile
+
+    # Scale state once
     state_scaled = (flat_obs - state_means) / state_scales
-    obs_rep = np.tile(state_scaled, (num_actions, 1))
-    action_scaled = (actions.astype(float) - action_mean) / action_scale
-    sa_features = np.concatenate([obs_rep, action_scaled.reshape(-1, 1)], axis=1)
 
-    # Query KDTree for all (s,a) at once
+    # Preallocate feature matrix: shape (A, state_dim + 1)
+    sa_features = np.empty(
+        (num_actions, state_scaled.size + 1), dtype=state_scaled.dtype
+    )
+    sa_features[:, :-1] = state_scaled  # row-broadcast
+    sa_features[:, -1] = (actions - action_mean) / action_scale
+
+    # Batched KDTree query; distances are sorted ascending, so last col is the max
     dists, ids = tree.query(sa_features, k=k)
+    far_mask = dists[:, -1] > float(max_dist)
 
-    # Determine fallback threshold per row
-    row_max_d = np.max(dists, axis=1)
-    far_mask = row_max_d > float(max_dist)
+    # Gather neighbour scores (A, k)
+    neighbour_scores = np.take(scores, ids)
 
-    # Compute per-action corrections from neighbour scores
-    neighbour_scores = scores[ids]  # shape (A, k)
-    # Vectorised 'higher' quantile selection matching _compute_correction
-    j_idx = int(np.ceil((k + 1) * (1 - float(alpha))) - 1)
-    j_idx = max(0, min(k - 1, j_idx))
-    # Use partition for O(k) selection of the j-th order statistic
+    # j_idx is precomputed order statistic index for conformal cutoff
     partitioned = np.partition(neighbour_scores, j_idx, axis=1)
     corrs = partitioned[:, j_idx]
-    # Apply fallback for far queries
+
+    # Apply global fallback when neighbourhood is too far
     corrs = np.where(far_mask, fallback_value, corrs)
-    # Subtract corrections vector from q-values
+
+    # Subtract corrections from Q-values and pick greedy action
     q_vals -= torch.as_tensor(corrs, dtype=q_vals.dtype, device=q_vals.device)
-    action = q_vals.argmax().numpy().reshape(1)
-    return action
+    action_idx = int(torch.argmax(q_vals))
+    return np.array([action_idx], dtype=np.int64)
 
 
 def _time_action_selection(
@@ -362,6 +390,7 @@ def main():
             score_fn=SCORE_FN,
             n_calib_steps=N_CALIB_STEPS,
         )
+
         ccnn_scores, ccnn_scaler, ccnn_tree, ccnn_max_dist, ccnn_fallback = (
             _calibrate_ccnn(
                 model,
@@ -373,6 +402,10 @@ def main():
                 max_distance_quantile=CCNN_MAX_DISTANCE_QUANTILE,
             )
         )
+
+        # Precompute j-th order statistic index used in conformal correction
+        CCNN_J_IDX = int(np.ceil((K + 1) * (1 - float(ALPHA_NN))) - 1)
+        CCNN_J_IDX = max(0, min(K - 1, CCNN_J_IDX))
 
         # Fresh eval env for timing loops
         eval_env = instantiate_eval_env(env_name=env)
@@ -413,8 +446,8 @@ def main():
                 tree=ccnn_tree,
                 scaler=ccnn_scaler,
                 k=K,
+                j_idx=CCNN_J_IDX,
                 max_dist=ccnn_max_dist,
-                alpha=ALPHA_NN,
                 fallback_value=ccnn_fallback,
             ),
             warmup_steps=WARMUP_STEPS_PER_METHOD,
@@ -441,6 +474,7 @@ def main():
             print(
                 f"{res.label:>12}: count={stats['count']:>5d}  "
                 f"median={stats['median_us']:.2f}us  mean={stats['mean_us']:.2f}us  "
+                f"std={stats['std_us']:.2f}us  "
                 f"p95={stats['p95_us']:.2f}us  p99={stats['p99_us']:.2f}us  "
                 f"overhead(x): median={overhead_median:.2f} mean={overhead_mean:.2f}"
             )
