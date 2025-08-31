@@ -6,3 +6,4 @@ ClassicControl = Literal[
 
 AgentTypes = Literal["vanilla", "cql", "ddqn"]
 ScoringMethod = Literal["monte_carlo", "td"]
+CalibMethods = Literal["nocalib", "ccdisc", "ccnn"]

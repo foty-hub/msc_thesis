@@ -2,9 +2,10 @@
 import os
 import pickle
 import pprint
+import warnings
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Callable, Literal, Sequence
+from typing import Callable, Sequence
 
 import gymnasium as gym
 import matplotlib.pyplot as plt
@@ -14,7 +15,7 @@ from ccnn import calibrate_ccnn, run_ccnn_experiment
 from stable_baselines3 import DQN
 from tqdm import tqdm
 
-from crl.cons._type import AgentTypes, ClassicControl, ScoringMethod
+from crl.cons._type import AgentTypes, CalibMethods, ClassicControl, ScoringMethod
 from crl.cons.agents import learn_cqldqn_policy, learn_ddqn_policy, learn_dqn_policy
 from crl.cons.calib import (
     collect_transitions,
@@ -28,20 +29,23 @@ from crl.cons.discretise import build_tile_coding
 from crl.cons.env import instantiate_eval_env
 from crl.utils.graphing import despine
 
+# prevent deprecation spam when using Lunar Lander
+warnings.filterwarnings("ignore", category=UserWarning)
+
 # fmt: off
-ALPHA = 0.1                 # Conformal prediction miscoverage level
-CQL_ALPHA = 1.0
+ALPHA_DISC = 0.01           # Conformal prediction miscoverage level (discrete algo)
+ALPHA_NN = 0.1              # Conformal prediction miscoverage level (nearest neighbour algo)
+CQL_ALPHA = 0.05
 MIN_CALIB = 50              # Minimum threshold for a calibration set to be leveraged
 NUM_EXPERIMENTS = 25
 NUM_EVAL_EPISODES=250
 N_CALIB_STEPS=10_000
-N_TRAIN_STEPS = 100_000
+N_TRAIN_STEPS = 120_000
 K = 50
-SCORING_METHOD: ScoringMethod = 'td'
-AGENT_TYPE: AgentTypes = 'cql'
+SCORING_METHOD: ScoringMethod = 'monte_carlo'
+AGENT_TYPE: AgentTypes = 'vanilla'
 SCORE_FN = signed_score
 RETRAIN = False
-CalibMethods = Literal['nocalib', 'ccdisc', 'ccnn']
 CALIB_METHODS: list[CalibMethods] = ['nocalib', 'ccdisc', 'ccnn']
 CCNN_MAX_DISTANCE_QUANTILE = 0.9
 
@@ -60,8 +64,8 @@ class ExperimentParams:
 
 EVAL_PARAMETERS = {
     # CartPole: vary pole length around nominal 0.5 value
-    # "CartPole-v1": ("length", np.arange(0.1, 3.1, 0.2), 6, 1),
-    "CartPole-v1": ("length", np.arange(0.1, 5.1, 0.4), 6, 1),
+    "CartPole-v1": ("length", np.arange(0.1, 3.1, 0.2), 6, 1),
+    # "CartPole-v1": ("length", np.arange(0.1, 5.1, 0.4), 6, 1),
     # Acrobot: vary link 1 length (0.5x–2.0x of default 1.0)
     "Acrobot-v1": ("LINK_LENGTH_1", np.linspace(0.5, 2.0, 16), 6, 1),
     # MountainCar: vary gravity around default 0.0025
@@ -205,7 +209,7 @@ def run_single_seed_experiment(
         )
     qhats, visits = compute_corrections(
         calib_sets,
-        alpha=ALPHA,
+        alpha=ALPHA_DISC,
         min_calib=MIN_CALIB,
     )
 
@@ -237,7 +241,7 @@ def run_single_seed_experiment(
         ccnn_results = run_ccnn_experiment(
             model,
             env_name=env_name,
-            alpha=ALPHA,
+            alpha=ALPHA_NN,
             k=K,
             ccnn_scores=ccnn_scores,
             tree=tree,
@@ -357,7 +361,8 @@ def main(env_name: str):
     experiment_info = {
         "env": env_name,
         "agent_type": AGENT_TYPE,
-        "alpha": ALPHA,
+        "alpha_disc": ALPHA_DISC,
+        "alpha_nn": ALPHA_NN,
         "disc_mincalib": MIN_CALIB,
         "n_train_steps": N_TRAIN_STEPS,
         "n_calib_steps": N_CALIB_STEPS,
@@ -414,7 +419,9 @@ def main(env_name: str):
 
 if __name__ == "__main__":
     # envs = ["CartPole-v1", "Acrobot-v1", "MountainCar-v0"]
-    env = "CartPole-v1"
+    # env = "CartPole-v1"
+    # env = "LunarLander-v3"
+    env = "MountainCar-v0"
     if env == "MountainCar-v0":
         assert N_TRAIN_STEPS == 120_000
     elif env == "Acrobot-v1":

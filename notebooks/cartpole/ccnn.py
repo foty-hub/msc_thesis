@@ -39,22 +39,16 @@ def _compute_correction(scores: np.ndarray, alpha: float):
     return qhat
 
 
-def compute_nn_scores(
+def compute_nn_scores_td(
     model: DQN,
     buffer: ReplayBuffer,
     score_fn: Callable,
-    scoring_method: str,
 ):
     vec_env = model.get_env()
     n_samples = buffer.capacity
     scores = np.zeros(n_samples)
     n_features = vec_env.observation_space.shape[0] + 1
     features = np.zeros((n_samples, n_features))
-
-    if scoring_method != "td":
-        raise NotImplementedError(
-            "Not yet implemented Monte Carlo return scoring for nearest neighbour"
-        )
     for ix, transition in enumerate(buffer):
         # compute score
         score = _compute_transition_score(model, transition, score_fn)
@@ -100,7 +94,6 @@ def compute_nn_scores_mc(
     model: DQN,
     buffer: ReplayBuffer,
     score_fn: Callable,
-    scoring_method: str,
 ):
     """Compute nearest-neighbour features and scores using Monte Carlo returns.
 
@@ -118,9 +111,6 @@ def compute_nn_scores_mc(
     scaler : StandardScaler
         Fitted scaler for the features.
     """
-    if scoring_method != "mc":
-        raise NotImplementedError("compute_nn_scores_mc expects scoring_method='mc'")
-
     vec_env = model.get_env()
     n_samples = buffer.capacity
     scores = np.zeros(n_samples)
@@ -238,17 +228,25 @@ def calibrate_ccnn(
     model: DQN,
     buffer: ReplayBuffer,
     k: int,
-    score_fn: Callable,
+    score_fn: Callable[tuple[np.ndarray, np.ndarray], np.ndarray],
     scoring_method: ScoringMethod,
     max_distance_quantile: float = 0.99,
     score_clip_level: float = 0.01,
 ):
-    scores, features, scaler = compute_nn_scores(
-        model,
-        buffer,
-        score_fn=score_fn,
-        scoring_method=scoring_method,
-    )
+    if scoring_method == "td":
+        scores, features, scaler = compute_nn_scores_td(
+            model,
+            buffer,
+            score_fn=score_fn,
+        )
+    elif scoring_method == "monte_carlo":
+        scores, features, scaler = compute_nn_scores_mc(
+            model,
+            buffer,
+            score_fn=score_fn,
+        )
+    else:
+        raise NotImplementedError(f"Unknown scoring_method: {scoring_method}")
 
     # clip the scores to remove extreme outliers
     scores = _clip_scores(score_clip_level, scores)

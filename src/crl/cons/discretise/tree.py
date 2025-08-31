@@ -2,6 +2,7 @@
 import numpy as np
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 from stable_baselines3.dqn import DQN
+
 from crl.cons.discretise.grid import run_test_episodes
 
 
@@ -219,7 +220,7 @@ def build_binary_partition(
 
 # %%
 if __name__ == "__main__":
-    from crl.cons.cartpole import learn_dqn_policy
+    from crl.cons.env import learn_dqn_policy
 
     env_name = "CartPole-v1"
     model, vec_env = learn_dqn_policy(

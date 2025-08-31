@@ -1,21 +1,21 @@
 # %%
 import pickle
-import numpy as np
-import gymnasium as gym
 from copy import deepcopy
-
-from tqdm import tqdm
 from typing import Any, Callable
+
+import gymnasium as gym
+import numpy as np
 from stable_baselines3 import DQN
+from tqdm import tqdm
 
 from crl.cons.calib import (
-    compute_lower_bounds,
     collect_transitions,
+    compute_lower_bounds,
     fill_calib_sets,
     unsigned_score,
 )
-from crl.cons.cartpole import instantiate_eval_env, learn_dqn_policy
 from crl.cons.discretise import build_tiling
+from crl.cons.env import instantiate_eval_env, learn_dqn_policy
 
 # fmt: off
 _DISCOUNT = 0.99            # Gamma/discount factor for the DQN
@@ -192,6 +192,7 @@ def plot_single_experiment(seed: int, results: list[dict]):
     conf_returns = np.array([res["returns_conf"] for res in results])
     lengths = np.array([res["length"] for res in results])
     import matplotlib.pyplot as plt
+
     from crl.utils.graphing import despine
 
     # Conformalised returns
