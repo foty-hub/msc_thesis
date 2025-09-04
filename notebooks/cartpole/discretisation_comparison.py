@@ -252,7 +252,7 @@ def plot_gmm_grid_and_clusters_2d(
 
 # %%
 
-env_name = "Acrobot-v1"
+env_name = "CartPole-v1"
 model, vec_env = learn_dqn_policy(
     env_name=env_name,
     seed=5,
