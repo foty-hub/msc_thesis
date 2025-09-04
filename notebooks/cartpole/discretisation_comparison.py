@@ -5,12 +5,10 @@ from crl.cons.agents import learn_dqn_policy
 from crl.cons.discretise import (
     Node,
     build_binary_partition,
-    build_cluster_partition,
     build_tile_coding,
     compute_bin_ranges,
     run_test_episodes,
 )
-from crl.cons.discretise.gmm import _scale_with_ranges
 
 # %%
 FONTSIZE = 16
@@ -133,121 +131,128 @@ def _plot_grid(stats, i, j, tiles, obs_quantile, np, X, ax1):
         ax1.axhline(y=ye, linewidth=1, alpha=0.8, color="k")
 
 
-def plot_gmm_grid_and_clusters_2d(
+def _plot_tile_coding(stats, i, j, tiles: int, tilings: int, obs_quantile: float, ax):
+    import numpy as np
+
+    # Compute quantile-bounded ranges similar to _plot_grid
+    X = np.column_stack([np.asarray(s["vals"]) for s in stats])
+    state_bins = [tiles] * X.shape[1]
+    maxs, mins = compute_bin_ranges(
+        stats, obs_quantile=obs_quantile, state_bins=state_bins
+    )
+
+    # Step sizes per dimension
+    dx = (maxs[i] - mins[i]) / tiles
+    dy = (maxs[j] - mins[j]) / tiles
+
+    # Draw each tiling with evenly spaced offsets within one tile width
+    # First tiling is unshifted; subsequent are offset by t/tilings of a tile
+    colors = ["k", "tab:orange", "tab:green", "tab:purple", "tab:red", "tab:blue"]
+    for t in range(tilings):
+        offx = (t / tilings) * dx
+        offy = (t / tilings) * dy
+
+        xi_edges = np.linspace(mins[i] + offx, maxs[i] + offx, tiles + 1)
+        yj_edges = np.linspace(mins[j] + offy, maxs[j] + offy, tiles + 1)
+
+        # Only draw lines that fall within the original bounds
+        cx = colors[t % len(colors)]
+        for xe in xi_edges:
+            if mins[i] <= xe <= maxs[i]:
+                ax.axvline(x=xe, linewidth=1, alpha=0.8, color=cx)
+        for ye in yj_edges:
+            if mins[j] <= ye <= maxs[j]:
+                ax.axhline(y=ye, linewidth=1, alpha=0.8, color=cx)
+
+
+def plot_discretisations_2x2(
     stats,
-    discretise_fn,
+    tree: Node,
     i: int,
     j: int,
-    tiles: int = 6,
+    grid_tiles: int = 6,
+    tile_tiles: int = 4,
+    tile_tilings: int = 2,
     obs_quantile: float = 0.1,
     param_names: list[str] | None = None,
 ):
-    """Visualise grid vs. GMM clusters and flagged anomalies in 2D.
-
-    Parameters
-    ----------
-    stats : list of dicts with key 'vals'
-    discretise_fn : function returned by build_cluster_partition (must have .gmm, .mins, .maxs, .threshold)
-    i, j : dimensions to plot
-    tiles : grid lines for left subplot
-    obs_quantile : passed to grid overlay for consistency
-    """
     import matplotlib.pyplot as plt
     import numpy as np
-    from matplotlib.patches import Ellipse
 
     X = np.column_stack([np.asarray(s["vals"]) for s in stats])
     x, y = X[:, i], X[:, j]
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6), sharex=True, sharey=True)
+    fig, axs = plt.subplots(2, 2, figsize=(12, 10), sharex=True, sharey=True)
+    (ax_tl, ax_tr), (ax_bl, ax_br) = axs
 
-    # Scatter raw data on both subplots
-    ax1.scatter(x, y, s=4, alpha=0.15)
-    ax2.scatter(x, y, s=4, alpha=0.15)
+    # Scatter on used axes (leave bottom-right empty for now)
+    for ax in (ax_tl, ax_tr, ax_bl):
+        ax.scatter(x, y, s=4, alpha=0.15)
 
-    # Left: uniform grid
-    _plot_grid(stats, i, j, tiles, obs_quantile, np, X, ax1)
-    ax1.set_title("Uniform grid")
+    # Top-left: Uniform grid
+    _plot_grid(stats, i, j, grid_tiles, obs_quantile, np, X, ax_tl)
+    ax_tl.set_title("Uniform grid")
 
-    # Right: GMM clusters + anomalies
-    gmm = discretise_fn.gmm
-    mins = discretise_fn.mins
-    maxs = discretise_fn.maxs
-    tau = discretise_fn.threshold
+    # Top-right: Tile coding (tiles, tilings)
+    _plot_tile_coding(stats, i, j, tile_tiles, tile_tilings, obs_quantile, ax_tr)
+    ax_tr.set_title(f"Tile coding (tiles={tile_tiles}, tilings={tile_tilings})")
 
-    Xs = _scale_with_ranges(X, mins, maxs)
-    ll = gmm.score_samples(Xs)
-    labels = gmm.predict(Xs)
-    is_anom = ll < tau
+    # Bottom-left: Binary partition (tree splits)
+    x_bounds = (np.min(x), np.max(x))
+    y_bounds = (np.min(y), np.max(y))
 
-    # Plot inliers by cluster
-    for k in range(gmm.n_components):
-        mask = (~is_anom) & (labels == k)
-        ax2.scatter(X[mask, i], X[mask, j], s=6, alpha=0.6, label=f"C{k}")
+    def _collect_split_lines_2d(node: Node, xb, yb, vlines, hlines):
+        if node.is_leaf:
+            return
+        t = node.threshold
+        d = node.dimension
+        if d == i:
+            if xb[0] < t < xb[1]:
+                vlines.append((t, yb[0], yb[1]))
+            left_x = (xb[0], min(xb[1], t))
+            right_x = (max(xb[0], t), xb[1])
+            _collect_split_lines_2d(node.left, left_x, yb, vlines, hlines)
+            _collect_split_lines_2d(node.right, right_x, yb, vlines, hlines)
+        elif d == j:
+            if yb[0] < t < yb[1]:
+                hlines.append((t, xb[0], xb[1]))
+            lower_y = (yb[0], min(yb[1], t))
+            upper_y = (max(yb[0], t), yb[1])
+            _collect_split_lines_2d(node.left, xb, lower_y, vlines, hlines)
+            _collect_split_lines_2d(node.right, xb, upper_y, vlines, hlines)
+        else:
+            _collect_split_lines_2d(node.left, xb, yb, vlines, hlines)
+            _collect_split_lines_2d(node.right, xb, yb, vlines, hlines)
 
-    # Plot anomalies
-    if np.any(is_anom):
-        ax2.scatter(
-            X[is_anom, i],
-            X[is_anom, j],
-            s=20,
-            marker="x",
-            linewidths=1.0,
-            label="anomaly",
-        )
+    vlines, hlines = [], []
+    _collect_split_lines_2d(tree, x_bounds, y_bounds, vlines, hlines)
 
-    # # Draw covariance ellipses for components (projected to (i,j)) in ORIGINAL units
-    # means = gmm.means_
-    # covs = gmm.covariances_
+    vset = {(float(x0), float(y0), float(y1)) for (x0, y0, y1) in vlines}
+    hset = {(float(y0), float(x0), float(x1)) for (y0, x0, x1) in hlines}
 
-    # # scaling transform: x_orig = mins + denom * x_scaled
-    # denom_all = np.where(maxs > mins, maxs - mins, 1.0)
-    # denom_2d = np.diag(denom_all[[i, j]])  # 2x2 diagonal
-    # mins_2d = mins[[i, j]]
+    for x0, y0, y1 in vset:
+        ax_bl.vlines(x0, y0, y1, linewidth=1, colors="k")
+    for y0, x0, x1 in hset:
+        ax_bl.hlines(y0, x0, x1, linewidth=1, colors="k")
+    ax_bl.set_title("Binary partition")
 
-    # # 95% equiprobability contour radius for 2D Gaussian
-    # c95 = 2.447746830680816  # sqrt(chi2.ppf(0.95, df=2)) without SciPy dep
+    # Bottom-right: left empty for now (scatter already drawn)
+    ax_br.set_title("")
 
-    # for k in range(gmm.n_components):
-    #     # mean in original units
-    #     mu_scaled_2d = means[k, [i, j]]
-    #     mu_orig_2d = mins_2d + denom_all[[i, j]] * mu_scaled_2d
-
-    #     # covariance in scaled space → original units via S * Σ * S
-    #     if gmm.covariance_type == "full":
-    #         cov2_scaled = covs[k][np.ix_([i, j], [i, j])]
-    #     elif gmm.covariance_type == "diag":
-    #         cov2_scaled = np.diag(covs[k][[i, j]])
-    #     elif gmm.covariance_type == "spherical":
-    #         cov2_scaled = np.eye(2) * covs[k]
-    #     else:  # tied
-    #         cov2_scaled = covs[np.ix_([i, j], [i, j])]
-
-    #     cov2_orig = denom_2d @ cov2_scaled @ denom_2d
-
-    #     vals, vecs = np.linalg.eigh(cov2_orig)
-    #     order = vals.argsort()[::-1]
-    #     vals, vecs = vals[order], vecs[:, order]
-    #     angle = np.degrees(np.arctan2(vecs[1, 0], vecs[0, 0]))
-
-    #     # width/height of 95% ellipse (factor 2*c95 because Ellipse expects full width/height)
-    #     width, height = 2.0 * c95 * np.sqrt(vals)
-    #     ell = Ellipse(
-    #         xy=mu_orig_2d, width=width, height=height, angle=angle, fill=False
-    #     )
-    #     ax2.add_patch(ell)
-
-    ax2.set_title("GMM clusters (ellipses) + anomalies")
-    for ax in (ax1, ax2):
+    # Labels (leave bottom-right without labels)
+    for ax in (ax_tl, ax_tr, ax_bl):
         if param_names:
             ax.set_xlabel(f"{param_names[i]}", fontsize=FONTSIZE)
             ax.set_ylabel(f"{param_names[j]}", fontsize=FONTSIZE)
         else:
             ax.set_xlabel(f"obs[{i}]", fontsize=FONTSIZE)
             ax.set_ylabel(f"obs[{j}]", fontsize=FONTSIZE)
-    ax2.legend(loc="best", fontsize=8)
+
     plt.tight_layout()
     plt.show()
+
+
+# (GMM clustering visualisation removed)
 
 
 # %%
@@ -260,78 +265,32 @@ model, vec_env = learn_dqn_policy(
     total_timesteps=120_000,
 )
 
-discretise_tile, n_features_tile = build_tile_coding(
-    model, vec_env, 6, 1, obs_quantile=0.0005
+# %%
+discretise_tile_4x2, n_features_tile_4x2 = build_tile_coding(
+    model, vec_env, 4, 2, obs_quantile=0.0005
 )
 
 discretise_tree, n_features_tree = build_binary_partition(
     model,
     vec_env,
-    max_depth=6,
+    max_depth=5,
     min_samples_leaf=1,
     use_impurity_split=True,
-    min_impurity_decrease=3e-1,
+    min_impurity_decrease=1e-4,
 )
-
-discretise_cluster, n_features_cluster = build_cluster_partition(
-    model,
-    vec_env,
-    k_min=1,
-    k_max=12,
-    obs_quantile=0.1,
-    scale_bins=6,
-    covariance_type="full",
-    reg_covar=1e-6,
-    max_iter=500,
-    n_init=1,
-    anomaly_frac=0.1,
-    random_state=5,
-    use_bic=True,
-)
-
-# Quick API check: both discretisers should accept (obs: (1, D)), (action: (1,))
-obs = vec_env.reset()
-
-# Action from the model and a random action
-act_model, _ = model.predict(obs, deterministic=True)
-act_rand = np.array([vec_env.action_space.sample()], dtype=np.int64)
-# %%
-for label, a in [("model", act_model), ("random", act_rand)]:
-    out_tile = discretise_tile(obs, a)
-    out_tree = discretise_tree(obs, a)
-    out_clust = discretise_cluster(obs, a)
-    print(
-        f"[API check:{label}] obs.shape={obs.shape}\n action.shape={a.shape} "
-        f"\n tile_out.shape={np.shape(out_tile)}\n tree_out.shape={np.shape(out_tree)}, "
-        f"\n cluster_out.shape={np.shape(out_clust)}"
-    )
-
-print("Feature Counts")
-print(f"  Tile/Grid: {int(n_features_tile):,}")
-print(f"  Tree     : {int(n_features_tree):,}")
-print(f"  Cluster  : {int(n_features_cluster):,}")
-# Visualise in 2D: compare uniform grid vs. learned tree leaves
-
 # %%
 xaxis = 0
 yaxis = 1
 
 stats = run_test_episodes(model, vec_env)
-plot_tree_grid_and_leaves_2d(
+plot_discretisations_2x2(
     stats,
     discretise_tree.tree,
     i=xaxis,
     j=yaxis,
-    tiles=6,
-    obs_quantile=0.1,
-    param_names=PARAM_NAMES[env_name],
-)
-plot_gmm_grid_and_clusters_2d(
-    stats,
-    discretise_cluster,
-    i=xaxis,
-    j=yaxis,
-    tiles=6,
+    grid_tiles=6,
+    tile_tiles=4,
+    tile_tilings=2,
     obs_quantile=0.1,
     param_names=PARAM_NAMES[env_name],
 )
