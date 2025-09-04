@@ -1,7 +1,10 @@
 # %%
 import numpy as np
+from ccnn import calibrate_ccnn
+from sklearn.neighbors import KDTree
 
 from crl.cons.agents import learn_dqn_policy
+from crl.cons.calib import collect_transitions, signed_score
 from crl.cons.discretise import (
     Node,
     build_binary_partition,
@@ -165,7 +168,7 @@ def _plot_tile_coding(stats, i, j, tiles: int, tilings: int, obs_quantile: float
                 ax.axhline(y=ye, linewidth=1, alpha=0.8, color=cx)
 
 
-def plot_discretisations_2x2(
+def plot_discretisations_3x1(
     stats,
     tree: Node,
     i: int,
@@ -175,72 +178,135 @@ def plot_discretisations_2x2(
     tile_tilings: int = 2,
     obs_quantile: float = 0.1,
     param_names: list[str] | None = None,
+    # CCNN heatmap inputs (optional)
+    ccnn_scores: np.ndarray | None = None,
+    ccnn_state_tree: KDTree | None = None,
+    ccnn_state_means: np.ndarray | None = None,
+    ccnn_state_scales: np.ndarray | None = None,
+    ccnn_max_dist: float | None = None,
+    knn_k: int = 50,
+    heat_res: int = 120,
 ):
     import matplotlib.pyplot as plt
     import numpy as np
+    from matplotlib.colors import Normalize
+    from matplotlib.patches import Rectangle
 
     X = np.column_stack([np.asarray(s["vals"]) for s in stats])
     x, y = X[:, i], X[:, j]
+    # Figure with 3 columns: left scatter, middle uniform grid (filled), right KNN heatmap
+    fig, (ax_l, ax_m, ax_r) = plt.subplots(
+        1, 3, figsize=(16, 5), sharex=True, sharey=True
+    )
 
-    fig, axs = plt.subplots(2, 2, figsize=(12, 10), sharex=True, sharey=True)
-    (ax_tl, ax_tr), (ax_bl, ax_br) = axs
+    # Prepare consistent color mapping based on CCNN scores
+    if ccnn_scores is None:
+        raise ValueError("ccnn_scores required for colouring.")
+    cmap = plt.get_cmap("viridis")
+    norm = Normalize(vmin=float(np.min(ccnn_scores)), vmax=float(np.max(ccnn_scores)))
 
-    # Scatter on used axes (leave bottom-right empty for now)
-    for ax in (ax_tl, ax_tr, ax_bl):
-        ax.scatter(x, y, s=4, alpha=0.15)
+    # Left: scatter of stats, coloured by kNN mean residual at each point
+    if ccnn_state_tree is None or ccnn_state_means is None or ccnn_state_scales is None:
+        raise ValueError("CCNN state KDTree and scaler stats are required.")
+    X_scaled = (X - ccnn_state_means) / ccnn_state_scales
+    dists_pts, ids_pts = ccnn_state_tree.query(X_scaled, k=knn_k)
+    vals_pts = np.mean(ccnn_scores[ids_pts], axis=1)
+    if ccnn_max_dist is not None:
+        far_mask_pts = dists_pts.max(axis=1) > float(ccnn_max_dist)
+        fallback_value = float(np.min(ccnn_scores))
+        vals_pts = np.where(far_mask_pts, fallback_value, vals_pts)
+    ax_l.scatter(x, y, c=vals_pts, s=6, alpha=0.25, cmap=cmap, norm=norm)
+    ax_l.set_title("Scatter coloured by residual score (kNN mean)")
 
-    # Top-left: Uniform grid
-    _plot_grid(stats, i, j, grid_tiles, obs_quantile, np, X, ax_tl)
-    ax_tl.set_title("Uniform grid")
+    # Middle: uniform grid coloured blocks using same mapping
+    state_bins = [grid_tiles] * X.shape[1]
+    maxs, mins = compute_bin_ranges(
+        stats, obs_quantile=obs_quantile, state_bins=state_bins
+    )
+    xi_edges = np.linspace(mins[i], maxs[i], grid_tiles + 1)
+    yj_edges = np.linspace(mins[j], maxs[j], grid_tiles + 1)
 
-    # Top-right: Tile coding (tiles, tilings)
-    _plot_tile_coding(stats, i, j, tile_tiles, tile_tilings, obs_quantile, ax_tr)
-    ax_tr.set_title(f"Tile coding (tiles={tile_tiles}, tilings={tile_tilings})")
+    # Evaluate at cell centres
+    centers = []
+    rects = []
+    for yi in range(grid_tiles):
+        y0, y1 = yj_edges[yi], yj_edges[yi + 1]
+        yc = 0.5 * (y0 + y1)
+        for xi in range(grid_tiles):
+            x0, x1 = xi_edges[xi], xi_edges[xi + 1]
+            xc = 0.5 * (x0 + x1)
+            centers.append((xc, yc))
+            rects.append((x0, y0, x1 - x0, y1 - y0))
 
-    # Bottom-left: Binary partition (tree splits)
-    x_bounds = (np.min(x), np.max(x))
-    y_bounds = (np.min(y), np.max(y))
+    # Build a batch of query states for centres, keeping other dims at empirical mean
+    full_means = np.mean(X, axis=0)
+    Q = np.tile(full_means, (len(centers), 1))
+    Q[:, i] = [c[0] for c in centers]
+    Q[:, j] = [c[1] for c in centers]
+    Q_scaled = (Q - ccnn_state_means) / ccnn_state_scales
+    dists_c, ids_c = ccnn_state_tree.query(Q_scaled, k=knn_k)
+    vals_c = np.mean(ccnn_scores[ids_c], axis=1)
+    if ccnn_max_dist is not None:
+        far_mask_c = dists_c.max(axis=1) > float(ccnn_max_dist)
+        fallback_value = float(np.min(ccnn_scores))
+        vals_c = np.where(far_mask_c, fallback_value, vals_c)
 
-    def _collect_split_lines_2d(node: Node, xb, yb, vlines, hlines):
-        if node.is_leaf:
-            return
-        t = node.threshold
-        d = node.dimension
-        if d == i:
-            if xb[0] < t < xb[1]:
-                vlines.append((t, yb[0], yb[1]))
-            left_x = (xb[0], min(xb[1], t))
-            right_x = (max(xb[0], t), xb[1])
-            _collect_split_lines_2d(node.left, left_x, yb, vlines, hlines)
-            _collect_split_lines_2d(node.right, right_x, yb, vlines, hlines)
-        elif d == j:
-            if yb[0] < t < yb[1]:
-                hlines.append((t, xb[0], xb[1]))
-            lower_y = (yb[0], min(yb[1], t))
-            upper_y = (max(yb[0], t), yb[1])
-            _collect_split_lines_2d(node.left, xb, lower_y, vlines, hlines)
-            _collect_split_lines_2d(node.right, xb, upper_y, vlines, hlines)
-        else:
-            _collect_split_lines_2d(node.left, xb, yb, vlines, hlines)
-            _collect_split_lines_2d(node.right, xb, yb, vlines, hlines)
+    # Outside-grid falloff: set background to lowest grid-cell value
+    fallback_grid_value = float(np.min(vals_c))
+    ax_m.set_facecolor(cmap(norm(fallback_grid_value)))
 
-    vlines, hlines = [], []
-    _collect_split_lines_2d(tree, x_bounds, y_bounds, vlines, hlines)
+    # Draw coloured rectangles
+    for (x0, y0, w, h), v in zip(rects, vals_c):
+        ax_m.add_patch(
+            Rectangle(
+                (x0, y0),
+                w,
+                h,
+                facecolor=cmap(norm(float(v))),
+                edgecolor="none",
+                alpha=0.85,
+            )
+        )
+    # Overlay black grid lines spanning full extent
+    for xe in xi_edges:
+        ax_m.axvline(x=xe, color="k", linewidth=1.0, alpha=0.9)
+    for ye in yj_edges:
+        ax_m.axhline(y=ye, color="k", linewidth=1.0, alpha=0.9)
 
-    vset = {(float(x0), float(y0), float(y1)) for (x0, y0, y1) in vlines}
-    hset = {(float(y0), float(x0), float(x1)) for (y0, x0, x1) in hlines}
+    ax_m.set_title("Uniform grid (cells coloured by kNN mean)")
 
-    for x0, y0, y1 in vset:
-        ax_bl.vlines(x0, y0, y1, linewidth=1, colors="k")
-    for y0, x0, x1 in hset:
-        ax_bl.hlines(y0, x0, x1, linewidth=1, colors="k")
-    ax_bl.set_title("Binary partition")
+    # Right: CCNN kNN mean score heatmap
+    xlo, xhi = float(np.min(x)), float(np.max(x))
+    ylo, yhi = float(np.min(y)), float(np.max(y))
 
-    # Bottom-right: left empty for now (scatter already drawn)
-    ax_br.set_title("")
+    full_means = np.mean(X, axis=0)
+    base = np.tile(full_means, (heat_res * heat_res, 1))
+    gx = np.linspace(xlo, xhi, heat_res)
+    gy = np.linspace(ylo, yhi, heat_res)
+    GX, GY = np.meshgrid(gx, gy)
+    base[:, i] = GX.ravel()
+    base[:, j] = GY.ravel()
+    Q_scaled = (base - ccnn_state_means) / ccnn_state_scales
+    dists, ids = ccnn_state_tree.query(Q_scaled, k=knn_k)
+    knn_means = np.mean(ccnn_scores[ids], axis=1)
+    if ccnn_max_dist is not None:
+        far_mask = dists.max(axis=1) > float(ccnn_max_dist)
+        fallback_value = float(np.min(ccnn_scores))
+        knn_means = np.where(far_mask, fallback_value, knn_means)
+    heat = knn_means.reshape(heat_res, heat_res)
 
-    # Labels (leave bottom-right without labels)
-    for ax in (ax_tl, ax_tr, ax_bl):
+    im = ax_r.imshow(
+        heat,
+        origin="lower",
+        extent=(xlo, xhi, ylo, yhi),
+        aspect="auto",
+        cmap=cmap,
+        norm=norm,
+    )
+    ax_r.set_title(f"CCNN kNN mean score (k={knn_k})")
+
+    # Labels
+    for ax in (ax_l, ax_m, ax_r):
         if param_names:
             ax.set_xlabel(f"{param_names[i]}", fontsize=FONTSIZE)
             ax.set_ylabel(f"{param_names[j]}", fontsize=FONTSIZE)
@@ -248,7 +314,26 @@ def plot_discretisations_2x2(
             ax.set_xlabel(f"obs[{i}]", fontsize=FONTSIZE)
             ax.set_ylabel(f"obs[{j}]", fontsize=FONTSIZE)
 
-    plt.tight_layout()
+    # Match axis limits to full scatter extents
+    xlim = (float(np.min(x)), float(np.max(x)))
+    ylim = (float(np.min(y)), float(np.max(y)))
+    for ax in (ax_l, ax_m, ax_r):
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+
+    # Single shared colorbar below the plots (horizontal)
+    # Add extra bottom margin so the colorbar does not clash
+    fig.subplots_adjust(bottom=0.22, wspace=0.12)
+    mappable = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+    cbar = fig.colorbar(
+        mappable,
+        ax=(ax_l, ax_m, ax_r),
+        orientation="horizontal",
+        fraction=0.06,
+        pad=0.1,
+    )
+    cbar.set_label("score", rotation=0)
+
     plt.show()
 
 
@@ -273,17 +358,37 @@ discretise_tile_4x2, n_features_tile_4x2 = build_tile_coding(
 discretise_tree, n_features_tree = build_binary_partition(
     model,
     vec_env,
-    max_depth=5,
+    max_depth=6,
     min_samples_leaf=1,
     use_impurity_split=True,
-    min_impurity_decrease=1e-4,
+    min_impurity_decrease=3e-1,
 )
 # %%
+# Calibrate CCNN and prepare state-space KDTree for kNN heatmap
+buffer = collect_transitions(model, vec_env, 5_000)
+ccnn_scores, ccnn_scaler, ccnn_full_tree, _ = calibrate_ccnn(
+    model, buffer, k=50, score_fn=signed_score, scoring_method="td"
+)
+# Build KDTree over state-only scaled features
+ccnn_state_features_scaled = np.asarray(ccnn_full_tree.data)[:, :-1]
+ccnn_state_tree = KDTree(ccnn_state_features_scaled)
+ccnn_state_means = ccnn_scaler.mean_[:-1]
+ccnn_state_scales = ccnn_scaler.scale_[:-1]
+"""
+Estimate a state-only max-distance threshold consistent with CCNN's falloff.
+We mimic calibrate_ccnn's logic: for each point, take the max distance to its
+K neighbours (excluding itself), then use a high quantile (0.99) as cutoff.
+"""
+_k = 15
+_dists_train, _ = ccnn_state_tree.query(ccnn_state_features_scaled, k=_k + 1)
+_per_point_max = _dists_train.max(axis=1)
+ccnn_state_max_dist = float(np.quantile(_per_point_max, 0.99))
+
 xaxis = 0
 yaxis = 1
 
 stats = run_test_episodes(model, vec_env)
-plot_discretisations_2x2(
+plot_discretisations_3x1(
     stats,
     discretise_tree.tree,
     i=xaxis,
@@ -293,6 +398,13 @@ plot_discretisations_2x2(
     tile_tilings=2,
     obs_quantile=0.1,
     param_names=PARAM_NAMES[env_name],
+    ccnn_scores=ccnn_scores,
+    ccnn_state_tree=ccnn_state_tree,
+    ccnn_state_means=ccnn_state_means,
+    ccnn_state_scales=ccnn_state_scales,
+    ccnn_max_dist=ccnn_state_max_dist,
+    knn_k=_k,
+    heat_res=120,
 )
 
 # %%
