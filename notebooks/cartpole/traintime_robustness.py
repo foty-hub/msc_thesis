@@ -53,10 +53,6 @@ CCNN_MAX_DISTANCE_QUANTILE = 0.9
 @dataclass
 class RobustnessConfig:
     """Configuration for robustness experiments.
-
-    This groups all parameters that were previously module-level constants so
-    they can be provided programmatically or via a CLI without relying on
-    implicit globals.
     """
 
     alpha_disc: float = ALPHA_DISC
@@ -91,7 +87,6 @@ class ExperimentParams:
 EVAL_PARAMETERS = {
     # CartPole: vary pole length around nominal 0.5 value
     "CartPole-v1": ("length", np.arange(0.1, 3.1, 0.2), 6, 1),
-    # "CartPole-v1": ("length", np.arange(0.1, 5.1, 0.4), 6, 1),
     # Acrobot: vary link 1 length (0.5x–2.0x of default 1.0)
     "Acrobot-v1": ("LINK_LENGTH_1", np.linspace(0.5, 2.0, 16), 6, 1),
     # MountainCar: vary gravity around default 0.0025
@@ -119,7 +114,7 @@ def run_eval(
 
     for ep in range(num_eps):
         obs = ep_env.reset()
-        ep_occupancy = []
+        # ep_occupancy = []
         for t in range(1000):
             q_vals = model.q_net(model.policy.obs_to_tensor(obs)[0]).flatten()
 
@@ -141,24 +136,24 @@ def run_eval(
 
             # The state-visitation count should be for the state *before* we step
             # the environment.
-            occupancy = correction_for(
-                obs,
-                action,
-                visits,
-                discretise,
-                agg=agg,
-                clip_correction=clip_correction,
-            )
+            # occupancy = correction_for(
+            #     obs,
+            #     action,
+            #     visits,
+            #     discretise,
+            #     agg=agg,
+            #     clip_correction=clip_correction,
+            # )
             obs, reward, done, info = ep_env.step(action)
 
-            ep_occupancy.append(occupancy)
+            # ep_occupancy.append(occupancy)
 
             if done:
                 ep_return = info[0]["episode"]["r"]
                 episodic_returns.append(ep_return)
                 break
 
-        all_occupancies.append(ep_occupancy)
+        # all_occupancies.append(ep_occupancy)
     return episodic_returns, all_occupancies
 
 
@@ -169,38 +164,45 @@ def run_shift_experiment(
     discretise: Callable,
     env_name: str,
     shift_params: dict,
+    cfg: RobustnessConfig,
     num_eps: int = NUM_EVAL_EPISODES,
 ):
     # instantiate the shifted env
     eval_vec_env = instantiate_eval_env(env_name=env_name, **shift_params)
+    exp_result = {"num_episodes": num_eps}
 
     # run an experiment with and without the CP lower-bound correction
-    returns_conf, visits_conf = run_eval(
-        model,
-        discretise,
-        num_eps=num_eps,
-        conformalise=True,
-        ep_env=eval_vec_env,
-        qhats=qhats,
-        visits=visits,
-    )
-    returns_noconf, visits_noconf = run_eval(
-        model,
-        discretise,
-        num_eps=num_eps,
-        conformalise=False,
-        ep_env=eval_vec_env,
-        qhats=qhats,
-        visits=visits,
-    )
+    if "ccdisc" in cfg.calib_methods:
+        returns_conf, visits_conf = run_eval(
+            model,
+            discretise,
+            num_eps=num_eps,
+            conformalise=True,
+            ep_env=eval_vec_env,
+            qhats=qhats,
+            visits=visits,
+        )
+        exp_result["returns_conf"] = returns_conf
 
-    exp_result = {
-        "returns_conf": returns_conf,
-        "returns_noconf": returns_noconf,
-        "visits_conf": visits_conf,
-        "visits_noconf": visits_noconf,
-        "num_episodes": num_eps,
-    }
+    if "nocalib" in cfg.calib_methods:
+        returns_noconf, visits_noconf = run_eval(
+            model,
+            discretise,
+            num_eps=num_eps,
+            conformalise=False,
+            ep_env=eval_vec_env,
+            qhats=qhats,
+            visits=visits,
+        )
+        exp_result["returns_noconf"] = returns_noconf
+
+    # exp_result = {
+    #     # "returns_conf": returns_conf,
+    #     # "returns_noconf": returns_noconf,
+    #     # "visits_conf": visits_conf,
+    #     # "visits_noconf": visits_noconf,
+    #     "num_episodes": num_eps,
+    # }
     exp_result.update(shift_params)
     return exp_result
 
@@ -254,31 +256,37 @@ def run_single_seed_experiment(
     for param_val in (pbar := tqdm(param_values)):
         pbar.set_description(f"{param}={param_val:.1f}")
         eval_parameters = {param: param_val}
-        disc_results = run_shift_experiment(
-            model,
-            qhats,
-            visits,
-            discretise,
-            shift_params=eval_parameters,
-            env_name=env_name,
-            num_eps=cfg.num_eval_episodes,
-        )
+        # Always record the evaluation parameter so plotting doesn't KeyError
+        shift_result = {param: float(param_val)}
+        if "nocalib" in cfg.calib_methods or "ccdisc" in cfg.calib_methods:
+            disc_results = run_shift_experiment(
+                model,
+                qhats,
+                visits,
+                discretise,
+                shift_params=eval_parameters,
+                env_name=env_name,
+                cfg=cfg,
+                num_eps=cfg.num_eval_episodes,
+            )
+            shift_result.update(disc_results)
 
-        ccnn_results = run_ccnn_experiment(
-            model,
-            env_name=env_name,
-            alpha=cfg.alpha_nn,
-            k=cfg.k,
-            ccnn_scores=ccnn_scores,
-            tree=tree,
-            scaler=scaler,
-            max_dist=max_dist,
-            param=param,
-            param_val=param_val,
-            num_eps=cfg.num_eval_episodes,
-        )
-        disc_results.update(ccnn_results)
-        results.append(disc_results)
+        if "ccnn" in cfg.calib_methods:
+            ccnn_results = run_ccnn_experiment(
+                model,
+                env_name=env_name,
+                alpha=cfg.alpha_nn,
+                k=cfg.k,
+                ccnn_scores=ccnn_scores,
+                tree=tree,
+                scaler=scaler,
+                max_dist=max_dist,
+                param=param,
+                param_val=param_val,
+                num_eps=cfg.num_eval_episodes,
+            )
+            shift_result.update(ccnn_results)
+        results.append(shift_result)
 
     return results
 
@@ -311,7 +319,6 @@ def train_agent(env_name: ClassicControl, seed: int, cfg: RobustnessConfig):
     return model, vec_env
 
 
-["nocalib", "ccdisc", "ccnn"]
 plot_params = {
     "nocalib": {"key": "returns_noconf", "label": "Uncalibrated", "c": "tab:orange"},
     "ccdisc": {"key": "returns_conf", "label": "Calibrated (Disc)", "c": "tab:blue"},
@@ -499,7 +506,7 @@ if __name__ == "__main__":
     # envs = ["CartPole-v1", "Acrobot-v1", "MountainCar-v0"]
     # env = "CartPole-v1"
     # env = "LunarLander-v3"
-    env = "MountainCar-v0"
+    env = "CartPole-v1"
     cfg = RobustnessConfig()
     if env == "MountainCar-v0":
         assert cfg.n_train_steps == 120_000
