@@ -82,7 +82,7 @@ def plot_discretisations_3x1(
     vals_pts = np.quantile(ccnn_scores[ids_pts], knn_quantile, axis=1)
     if use_knn_fallback and ccnn_max_dist is not None:
         far_mask_pts = dists_pts.max(axis=1) > float(ccnn_max_dist)
-        fallback_value = float(np.min(ccnn_scores))
+        fallback_value = float(np.max(ccnn_scores))
         vals_pts = np.where(far_mask_pts, fallback_value, vals_pts)
     ax_l.scatter(x, y, c=vals_pts, s=6, alpha=scatter_alpha, cmap=cmap, norm=norm)
     ax_l.set_title("")
@@ -117,11 +117,11 @@ def plot_discretisations_3x1(
     vals_c = np.quantile(ccnn_scores[ids_c], knn_quantile, axis=1)
     if use_knn_fallback and ccnn_max_dist is not None:
         far_mask_c = dists_c.max(axis=1) > float(ccnn_max_dist)
-        fallback_value = float(np.min(ccnn_scores))
+        fallback_value = float(np.max(ccnn_scores))
         vals_c = np.where(far_mask_c, fallback_value, vals_c)
 
     # Outside-grid falloff: set background to lowest grid-cell value
-    fallback_grid_value = float(np.min(vals_c))
+    fallback_grid_value = float(np.max(vals_c))
     ax_m.set_facecolor(cmap(norm(fallback_grid_value)))
 
     # Draw coloured rectangles
@@ -160,7 +160,7 @@ def plot_discretisations_3x1(
     knn_vals = np.quantile(ccnn_scores[ids], knn_quantile, axis=1)
     if use_knn_fallback and ccnn_max_dist is not None:
         far_mask = dists.max(axis=1) > float(ccnn_max_dist)
-        fallback_value = float(np.min(ccnn_scores))
+        fallback_value = float(np.max(ccnn_scores))
         knn_vals = np.where(far_mask, fallback_value, knn_vals)
     heat = knn_vals.reshape(heat_res, heat_res)
 
@@ -222,7 +222,7 @@ def plot_discretisations_3x1(
 
 # %%
 
-env_name = "Acrobot-v1"
+env_name = "CartPole-v1"
 model, vec_env = learn_dqn_policy(
     env_name=env_name,
     seed=5,
@@ -253,8 +253,8 @@ _dists_train, _ = ccnn_state_tree.query(ccnn_state_features_scaled, k=_k + 1)
 _per_point_max = _dists_train.max(axis=1)
 ccnn_state_max_dist = float(np.quantile(_per_point_max, obs_quantile))
 
-xaxis = 1
-yaxis = 5
+xaxis = 0
+yaxis = 1
 
 plot_discretisations_3x1(
     stats,
