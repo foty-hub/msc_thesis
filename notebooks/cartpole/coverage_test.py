@@ -301,7 +301,7 @@ xs = np.linspace(0.0, 1, 200)
 ys = dist.pdf(xs)
 # scale theoretical curve to match
 ys = ys / ys.max()
-ys = ys * vals.max() * 1.15
+ys = ys * vals.max() * 1.23
 
 ax.plot(xs, ys, label="Theoretical coverage", linestyle="--", c="tab:red")
 
