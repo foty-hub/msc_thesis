@@ -1,4 +1,4 @@
-from typing import Any, Callable, Literal
+from typing import Any, Callable
 
 import gymnasium as gym
 import numpy as np
@@ -7,9 +7,9 @@ from sklearn.neighbors import BallTree, KDTree
 from sklearn.preprocessing import StandardScaler
 from stable_baselines3 import DQN
 
-from crl.cons._type import ScoringMethod
-from crl.cons.buffer import ReplayBuffer, Transition
-from crl.cons.env import instantiate_eval_env
+from crl.buffer import ReplayBuffer, Transition
+from crl.env import instantiate_eval_env
+from crl.types import ScoringMethod
 
 
 def _compute_transition_score(
@@ -176,7 +176,7 @@ def run_ccnn_eval(
                 # Scale the feature before NN search
                 sa_feature = scaler.transform(sa_feature)
                 dists, ids = tree.query(sa_feature, k=k)
-                if (sa_maxdist := np.max(dists)) > max_dist:  # too far, anomalous
+                if np.max(dists) > max_dist:  # too far, anomalous
                     correction = fallback_value  # * np.maximum(1.0, sa_maxdist)
                 else:
                     neighbour_scores = scores[ids]
@@ -228,7 +228,7 @@ def calibrate_ccnn(
     model: DQN,
     buffer: ReplayBuffer,
     k: int,
-    score_fn: Callable[tuple[np.ndarray, np.ndarray], np.ndarray],
+    score_fn: Callable[[np.ndarray, np.ndarray], np.ndarray],
     scoring_method: ScoringMethod,
     max_distance_quantile: float = 0.99,
     score_clip_level: float = 0.01,
