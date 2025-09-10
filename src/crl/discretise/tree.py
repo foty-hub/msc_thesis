@@ -3,7 +3,7 @@ import numpy as np
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 from stable_baselines3.dqn import DQN
 
-from crl.cons.discretise.grid import run_test_episodes
+from crl.discretise.grid import run_test_episodes
 
 
 class Node:

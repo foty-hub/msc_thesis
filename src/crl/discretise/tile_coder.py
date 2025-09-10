@@ -1,9 +1,10 @@
 # %%
 import numpy as np
+from PyFixedReps import TileCoder, TileCoderConfig
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 from stable_baselines3.dqn import DQN
-from PyFixedReps import TileCoder, TileCoderConfig
-from crl.cons.discretise.grid import run_test_episodes, compute_bin_ranges
+
+from crl.discretise.grid import compute_bin_ranges, run_test_episodes
 
 FONTSIZE = 16
 

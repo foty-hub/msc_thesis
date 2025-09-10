@@ -2,7 +2,7 @@ import gymnasium as gym
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
-from crl.cons._type import ClassicControl
+from crl.types import ClassicControl
 
 
 def instantiate_eval_env(

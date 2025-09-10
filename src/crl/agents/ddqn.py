@@ -9,6 +9,7 @@ import torch.nn.functional as F
 import yaml
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
+from crl.utils.paths import get_models_dir
 
 
 class DDQN(DQN):
@@ -99,19 +100,20 @@ def learn_ddqn_policy(
     env_name: ClassicControl,
     seed: int = 0,
     total_timesteps: int = 50_000,
-    model_dir: str = "models",
+    model_dir: str | Path | None = None,
     train_from_scratch: bool = False,
 ) -> tuple[DDQN, VecEnv]:
     # Path for caching the trained model
-    model_dir = os.path.join(model_dir, env_name, "ddqn")
-    os.makedirs(model_dir, exist_ok=True)
+    base_dir = Path(model_dir) if model_dir is not None else get_models_dir()
+    algo_dir = base_dir / env_name / "ddqn"
+    os.makedirs(algo_dir, exist_ok=True)
     model_basename = f"model_{seed}"
-    model_path = os.path.join(model_dir, model_basename)
+    model_path = algo_dir / model_basename
 
     # Load cached model if available and not training from scratch
-    if not train_from_scratch and os.path.exists(model_path + ".zip"):
+    if not train_from_scratch and os.path.exists(str(model_path) + ".zip"):
         print(f"Loading DDQN model: {seed}")
-        model = DDQN.load(model_path)
+        model = DDQN.load(str(model_path))
         # Attach a fresh environment so the model is usable immediately
         env = gym.make(env_name, render_mode="rgb_array")
         model.set_env(env)
@@ -120,7 +122,7 @@ def learn_ddqn_policy(
         print(f"Learning DDQN from scratch: {seed}")
         model = instantiate_ddqn(env_name, seed)
         model.learn(total_timesteps=total_timesteps, progress_bar=True)
-        model.save(model_path)
+        model.save(str(model_path))
 
     # Retrieve the vectorised environment
     vec_env = model.get_env() if model.get_env() is not None else model.env

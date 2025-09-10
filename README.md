@@ -23,3 +23,14 @@ Currently, all the experiments live in notebooks in the `notebooks/` dir. These 
 ```bash
 >>> uv run pytest
 ```
+
+## Models Directory
+- Configure a single models cache root via `.env` with `MODELS_DIR`.
+- `MODELS_DIR` may be relative; it is resolved against the project root (the folder containing `pyproject.toml` or `.git`).
+- Defaults to `models/` at the project root if unset.
+
+Example `.env`:
+```
+MODELS_DIR=models
+```
+This resolves to `<repo>/models`, regardless of where you run scripts or notebooks.

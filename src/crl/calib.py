@@ -7,7 +7,7 @@ import torch
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
-from crl.cons.buffer import ReplayBuffer
+from crl.buffer import ReplayBuffer
 
 AggregationStrategy = Literal["max", "mean", "median"]
 
