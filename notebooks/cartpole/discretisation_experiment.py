@@ -2,6 +2,7 @@
 import os
 import pickle
 import pprint
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
@@ -22,12 +23,11 @@ from crl.cons.calib import (
     signed_score,
 )
 from crl.cons.discretise import (
-    build_tile_coding,
     build_binary_partition,
+    build_tile_coding,
 )
 from crl.cons.env import instantiate_eval_env
 from crl.utils.graphing import despine
-
 
 # ---------------- Defaults mirrored from traintime_robustness -----------------
 ALPHA_DISC = 0.01
@@ -132,7 +132,7 @@ def build_discretiser_variants(
     dims = int(vec_env.observation_space.shape[0])
 
     def _ensure_index_array(
-        disc_fn: Callable[[np.ndarray, np.ndarray], int | np.ndarray]
+        disc_fn: Callable[[np.ndarray, np.ndarray], int | np.ndarray],
     ):
         def _wrapped(obs: np.ndarray, action: np.ndarray):
             # Ensure obs has leading batch dim
@@ -179,7 +179,11 @@ def build_discretiser_variants(
     # Tile-coding variants
     for tiles, tilings in cfg.tile_options:
         discretise, n_states = build_tile_coding(
-            model, vec_env, tiles=tiles, tilings=tilings, obs_quantile=cfg.tile_obs_quantile
+            model,
+            vec_env,
+            tiles=tiles,
+            tilings=tilings,
+            obs_quantile=cfg.tile_obs_quantile,
         )
         discretise = _ensure_index_array(discretise)
         variants.append(
@@ -309,7 +313,9 @@ def run_single_seed_experiment(env_name: str, seed: int, cfg: DiscExpConfig):
     param, param_values, _tiles, _tilings = EVAL_PARAMETERS[env_name]
     results = []
     for param_val in param_values:
-        eval_vec_env = instantiate_eval_env(env_name=env_name, **{param: float(param_val)})
+        eval_vec_env = instantiate_eval_env(
+            env_name=env_name, **{param: float(param_val)}
+        )
         entry = {param: float(param_val), "num_episodes": cfg.num_eval_episodes}
         for v in variants:
             key = v["label"]
@@ -335,7 +341,13 @@ def run_single_seed_experiment(env_name: str, seed: int, cfg: DiscExpConfig):
 SCHEME_COLOURS = {"grid": "tab:blue", "tile": "tab:orange", "tree": "tab:green"}
 
 
-def plot_per_seed(results: list[dict], metadata: list[dict], env_name: str, cfg: DiscExpConfig, out_dir: str):
+def plot_per_seed(
+    results: list[dict],
+    metadata: list[dict],
+    env_name: str,
+    cfg: DiscExpConfig,
+    out_dir: str,
+):
     x_key = EVAL_PARAMETERS[env_name][0]
     xvals = np.array([res[x_key] for res in results])
 
@@ -375,9 +387,17 @@ def plot_per_seed(results: list[dict], metadata: list[dict], env_name: str, cfg:
 
 
 # ------------------------------- Main -----------------------------------------
-def main(env_name: ClassicControl, config: DiscExpConfig | dict | None = None, results_out: str | None = None):
+def main(
+    env_name: ClassicControl,
+    config: DiscExpConfig | dict | None = None,
+    results_out: str | None = None,
+):
     # Config normalisation
-    cfg = DiscExpConfig(**config) if isinstance(config, dict) else (config or DiscExpConfig())
+    cfg = (
+        DiscExpConfig(**config)
+        if isinstance(config, dict)
+        else (config or DiscExpConfig())
+    )
 
     # Determine results dir
     exp_dir = os.path.join("results", results_out or env_name, "discretisers")
@@ -406,18 +426,30 @@ def main(env_name: ClassicControl, config: DiscExpConfig | dict | None = None, r
     with open(os.path.join(exp_dir, "experiment_config.yaml"), "w") as f:
         yaml.safe_dump(experiment_info, f, sort_keys=False)
 
-    # Iterate over seeds serially to keep plotting simple and deterministic
-    all_results = []
-    for seed in range(cfg.num_experiments):
-        print(f"Seed {seed}")
-        single_results, metadata = run_single_seed_experiment(env_name, seed, cfg)
-        plot_dir = os.path.join(exp_dir, f"seed_{seed}")
-        plot_per_seed(single_results, metadata, env_name, cfg, plot_dir)
-        all_results.append({"seed": seed, "results": single_results, "metadata": metadata})
+    seeds = list(range(cfg.num_experiments))
+    max_workers = min(cfg.num_experiments, os.cpu_count() or 1)
 
-        # Save incrementally
-        with open(os.path.join(exp_dir, "discretisation_experiment.pkl"), "wb") as f:
-            pickle.dump(all_results, f)
+    all_results = []
+    with ProcessPoolExecutor(max_workers=max_workers) as ex:
+        future_to_seed = {
+            ex.submit(run_single_seed_experiment, env_name, seed, cfg): seed
+            for seed in seeds
+        }
+
+        for future in as_completed(future_to_seed):
+            seed = future_to_seed[future]
+            single_results, metadata = future.result()
+            plot_dir = os.path.join(exp_dir, f"seed_{seed}")
+            plot_per_seed(single_results, metadata, env_name, cfg, plot_dir)
+            all_results.append(
+                {"seed": seed, "results": single_results, "metadata": metadata}
+            )
+
+            # Save incrementally as results arrive
+            with open(
+                os.path.join(exp_dir, "discretisation_experiment.pkl"), "wb"
+            ) as f:
+                pickle.dump(all_results, f)
 
     return all_results
 
@@ -434,3 +466,5 @@ if __name__ == "__main__":
         elif env == "CartPole-v1":
             assert cfg.n_train_steps in [50_000, 100_000]
         main(env_name=env, config=cfg)
+
+# %%
