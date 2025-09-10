@@ -196,13 +196,6 @@ def run_shift_experiment(
         )
         exp_result["returns_noconf"] = returns_noconf
 
-    # exp_result = {
-    #     # "returns_conf": returns_conf,
-    #     # "returns_noconf": returns_noconf,
-    #     # "visits_conf": visits_conf,
-    #     # "visits_noconf": visits_noconf,
-    #     "num_episodes": num_eps,
-    # }
     exp_result.update(shift_params)
     return exp_result
 
