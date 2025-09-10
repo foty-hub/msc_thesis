@@ -25,6 +25,7 @@ dependencies = [
     "pyfixedreps-andnp==4.1.2",
     "pygame>=2.6.1",
     "pytest>=8.4.1",
+    "python-dotenv>=1.0.1",
     "rliable>=1.2.0",
     "scikit-learn>=1.7.1",
     "seaborn>=0.13.2",

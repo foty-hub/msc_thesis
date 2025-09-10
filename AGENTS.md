@@ -1,36 +1,38 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `src/crl/`: library code
-  - `agents/`, `predictors/`, `envs/`, `cons/` (configs, discretisers, RL algos), `utils/`.
-- `tests/`: pytest suite mirroring `crl` (e.g., `tests/crl/envs/...`).
-- `notebooks/`: exploratory experiments (being migrated into `src/`).
-- `models/`, `results/`, `images/`, `data/`: saved artifacts, run outputs, figures, datasets.
-- Top-level scripts (e.g., `2021_05_07_dqn_lunarlander.py`) are runnable experiment entry points.
+- `src/crl/`: core library code (agents, discretise, utils, configs, env, buffer, types, calib).
+- `src/crl/configs/`: YAML configs named by Gymnasium env IDs (e.g., `CartPole-v1.yml`).
+- `notebooks/`: experiments and analyses; move stable logic into `src/crl/`.
+- `tests/`: `pytest` suites grouped by area (`agents/`, `envs/`, `predictors/`).
+- `results/`, `models/`, `wandb/`: generated artifacts; gitignored by default.
 
 ## Build, Test, and Development Commands
-- Install (uv): `uv sync && uv pip install -e .` — resolves deps (Python ≥3.12) and installs package in editable mode.
-- Run tests: `uv run pytest -q` — executes the full test suite.
-- Focused tests: `uv run pytest tests/crl/envs/test_frozen_lake.py -k slip` — run a subset quickly.
+- Environment (Python ≥ 3.12) via `uv`:
+  - `uv sync` — create env and install dependencies.
+  - `uv pip install -e .` — editable install to expose `crl` package.
+- Run tests:
+  - `uv run pytest -q` — full suite.
+  - `uv run pytest tests/crl/envs/test_frozen_lake.py::test_no_slip_with_zero_prob` — single test.
+- Notebooks:
+  - `uv run jupyter lab` — open notebooks with project kernel.
 
 ## Coding Style & Naming Conventions
-- Python style: PEP 8, 4‑space indentation, 88–100 col soft limit.
-- Naming: modules/files/functions `snake_case`; classes `CamelCase`; constants `UPPER_SNAKE`.
-- Imports: stdlib → third‑party → local; prefer absolute imports within `crl`.
-- Typing: add type hints to new/modified public APIs; include short docstrings (what/why over how).
-- Formatting: no strict tool pinned; keep consistent. If you use formatters, align with PEP 8 and sorted imports.
+- Follow PEP 8 with 4‑space indentation and type hints.
+- Names: modules/files `snake_case`; classes `PascalCase`; functions/vars `snake_case`; constants `UPPER_SNAKE_CASE`.
+- Keep config files small, declarative, and environment‑scoped (e.g., `src/crl/configs/LunarLander-v3.yml`).
+- Prefer pure functions and small modules under `src/crl/`; move notebook‑only code into library modules when reused.
 
 ## Testing Guidelines
-- Framework: `pytest` with simple, deterministic tests; seed randomness where applicable.
-- Layout: mirror package paths under `tests/`; name files `test_*.py`, functions `test_*`.
-- Coverage: not enforced; prioritize core logic (e.g., predictors, env wrappers). Add regression tests with minimal fixtures.
+- Framework: `pytest`. Place tests under `tests/<area>/test_*.py`; test functions `test_*`.
+- Determinism: set RNG seeds (e.g., `np.random.seed(42)`); avoid network calls. If logging, set `WANDB_MODE=offline`.
+- Scope: include unit tests for new modules and update affected tests when changing behaviors.
 
 ## Commit & Pull Request Guidelines
-- Commits: concise, imperative mood; include scope when helpful (e.g., `agents: add ddqn implementation`, `envs: tweak cartpole lr`). Group related changes; avoid mixing refactors with features.
-- PRs: clear description of problem and approach; link issues; include run commands and configs (e.g., YAMLs in `src/crl/cons/configs/`), and attach key results/plots under `results/` or `images/`.
-- Checks: ensure `uv run pytest` passes; note breaking changes and migration steps.
+- Commits: short, imperative subject (≤72 chars), optional body. Group related changes. Example: `fix: stabilize slip wrapper`.
+- Link issues/PRs using `#<id>` when relevant.
+- PRs: clear description, motivation, reproduction steps (configs/commands), and test coverage. Include plots/screenshots for results changes and note any updated notebooks.
 
-## Configuration & Repro Tips
-- Configs: prefer YAMLs in `src/crl/cons/configs/` for algorithm/env params; commit small configs.
-- Repro: record seeds, package versions, and commands; avoid committing large artifacts; keep credentials out of git.
-
+## Security & Configuration Tips
+- Keep secrets in `.env` (e.g., W&B API key); never commit them.
+- Large artifacts in `results/` and `models/` are ignored—do not override ignore rules.
