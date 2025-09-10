@@ -86,7 +86,7 @@ class ExperimentParams:
 
 EVAL_PARAMETERS = {
     # CartPole: vary pole length around nominal 0.5 value
-    "CartPole-v1": ("length", np.arange(0.1, 3.1, 0.2), 6, 1),
+    "CartPole-v1": ("length", np.arange(0.1, 3.1, 0.2), 4, 1),
     # Acrobot: vary link 1 length (0.5x–2.0x of default 1.0)
     "Acrobot-v1": ("LINK_LENGTH_1", np.linspace(0.5, 2.0, 16), 6, 1),
     # MountainCar: vary gravity around default 0.0025
