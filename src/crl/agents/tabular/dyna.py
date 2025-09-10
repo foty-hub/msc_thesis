@@ -1,9 +1,11 @@
+from dataclasses import dataclass
 from typing import Protocol
+
 import gymnasium as gym
 import numpy as np
-from dataclasses import dataclass
-from crl.predictors.tabular import Predictor, NoPredictor
-from crl.agents.tabular.types import State, Action, Observation
+
+from crl.agents.tabular.types import Action, Observation, State
+from crl.predictors.tabular import NoPredictor, Predictor
 
 
 @dataclass
@@ -29,6 +31,7 @@ class DynaVAgent:
         env: gym.Env,
         params: DynaAgentParams,
         predictor: Predictor,
+        use_expectation: bool = False,
     ) -> None:
         S: int = env.observation_space.n  # type: ignore
         A: int = env.action_space.n  # type: ignore
@@ -51,6 +54,7 @@ class DynaVAgent:
         # conformal parameters
         self.predictor = predictor
         self.use_predictor = params.use_predictor
+        self.use_expectation = use_expectation
 
     def _setup_models(self, S: int, A: int) -> None:
         # define arrays for a simple counting world model

@@ -1,13 +1,14 @@
 # %%
+import os
+from pathlib import Path
+from typing import Literal
+
+import gymnasium as gym
 import torch
 import torch.nn.functional as F
-from stable_baselines3 import DQN
-import os
-from typing import Literal
-import gymnasium as gym
-from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 import yaml
-from pathlib import Path
+from stable_baselines3 import DQN
+from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
 
 class CQLDQN(DQN):
@@ -94,17 +95,14 @@ def _alpha_to_fname(alpha: float) -> str:
 def instantiate_cql_dqn(
     env_name: ClassicControl,
     seed: int = 0,
-    discount: float = 0.99,
     cql_alpha: float = 0.0,
 ) -> CQLDQN:
     env = gym.make(env_name, render_mode="rgb_array")
 
     # using SB3 zoo suggested hyperparameters (path relative to this file)
-    config_path = Path(__file__).resolve().parent / "configs" / f"{env_name}.yml"
+    config_path = Path(__file__).resolve().parent / ".." / "configs" / f"{env_name}.yml"
     with open(config_path, "r") as f:
         dqn_args = yaml.safe_load(f)
-
-    dqn_args["gamma"] = discount
 
     model = CQLDQN(env=env, seed=seed, cql_alpha=cql_alpha, **dqn_args)
     return model
@@ -113,7 +111,6 @@ def instantiate_cql_dqn(
 def learn_cqldqn_policy(
     env_name: ClassicControl,
     seed: int = 0,
-    discount: float = 0.99,
     cql_alpha: float = 0.0,
     total_timesteps: int = 50_000,
     model_dir: str = "models",
@@ -135,7 +132,7 @@ def learn_cqldqn_policy(
     else:
         # Train a new model from scratch
         print(f"Learning CQLDQN from scratch: {seed}, alpha: {cql_alpha}")
-        model = instantiate_cql_dqn(env_name, seed, discount, cql_alpha)
+        model = instantiate_cql_dqn(env_name, seed, cql_alpha)
         model.learn(total_timesteps=total_timesteps, progress_bar=True)
         model.save(model_path)
 
@@ -146,8 +143,8 @@ def learn_cqldqn_policy(
 
 # %%
 def main():
-    import numpy as np
     import gymnasium as gym
+    import numpy as np
     from stable_baselines3.common.evaluation import evaluate_policy
 
     dqn_args = {

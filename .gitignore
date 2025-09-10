@@ -13,13 +13,16 @@ data/
 
 # ignore testing model path
 notebooks/checkpoints
+notebooks/cp_generic/my_trained_model
 
 # ignore logging
 wandb/
 
 *.pkl
 
-# Ignore CartPole experimental results
+# Ignore CartPole experimental results and lunar lander pdf images
 results/**/*.png
 results/**/*.pkl
+results/**/*.yaml
 models/
+results/lunarlander/**/*.pdf
