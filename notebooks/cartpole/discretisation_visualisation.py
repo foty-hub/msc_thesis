@@ -164,7 +164,7 @@ def plot_discretisations_3x1(
         knn_vals = np.where(far_mask, fallback_value, knn_vals)
     heat = knn_vals.reshape(heat_res, heat_res)
 
-    im = ax_r.imshow(
+    ax_r.imshow(
         heat,
         origin="lower",
         extent=(xlo, xhi, ylo, yhi),

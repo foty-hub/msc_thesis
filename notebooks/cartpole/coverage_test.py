@@ -1,6 +1,5 @@
 # %%
 import pickle
-from copy import deepcopy
 from typing import Any, Callable
 
 import gymnasium as gym

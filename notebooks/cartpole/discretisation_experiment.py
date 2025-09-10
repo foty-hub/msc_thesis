@@ -129,7 +129,6 @@ def build_discretiser_variants(
     Returns a list of dicts with keys: scheme, label, params, discretise, n_states.
     """
     variants = []
-    dims = int(vec_env.observation_space.shape[0])
 
     def _ensure_index_array(
         disc_fn: Callable[[np.ndarray, np.ndarray], int | np.ndarray],
@@ -382,7 +381,7 @@ def plot_per_seed(
     plt.tight_layout()
 
     os.makedirs(out_dir, exist_ok=True)
-    plt.savefig(os.path.join(out_dir, f"disc_robustness.png"))
+    plt.savefig(os.path.join(out_dir, "disc_robustness.png"))
     plt.close()
 
 

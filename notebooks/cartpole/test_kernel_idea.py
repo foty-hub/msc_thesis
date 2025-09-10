@@ -294,8 +294,7 @@ good_seeds_perf = [int(s) for s in good_seeds_perf]
 avg_perf = (conf[good_seeds_perf].mean(2) / noconf[good_seeds_perf].mean(2)).mean(1).mean()
 print(f'{avg_perf:.3f}x improvement')
 # %%
-import os
-import pickle
+
 
 results_dir = f'results/{env_name}_nn'
 os.makedirs(results_dir)

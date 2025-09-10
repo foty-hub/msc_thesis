@@ -11,7 +11,7 @@ import pickle
 import pprint
 import warnings
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Sequence
 
 import gymnasium as gym
