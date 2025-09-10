@@ -1,7 +1,9 @@
 # %%
+"Quick utility for counting model params for report"
+
 from typing import Dict, Tuple
 
-from crl.cons.agents import learn_dqn_policy
+from crl.agents import learn_dqn_policy
 
 
 def count_params(module) -> int:
@@ -40,16 +42,22 @@ def count_dqn_training_step_params(model) -> Tuple[int, Dict[str, int]]:
     return sum(parts.values()), parts
 
 
-# Usage:
+def main():
+    env = "LunarLander-v3"
+    model, vec_env = learn_dqn_policy(env)
+    n_infer, breakdown_infer = count_dqn_inference_params(model)
+    n_train, breakdown_train = count_dqn_training_step_params(model)
+    n_policy_total = sum(
+        p.numel() for p in model.policy.parameters() if p.requires_grad
+    )
 
-env = "LunarLander-v3"
-model, vec_env = learn_dqn_policy(env)
-n_infer, breakdown_infer = count_dqn_inference_params(model)
-n_train, breakdown_train = count_dqn_training_step_params(model)
-n_policy_total = sum(p.numel() for p in model.policy.parameters() if p.requires_grad)
+    print("DQN inference params:", n_infer, breakdown_infer)
+    print("DQN training-step params:", n_train, breakdown_train)
+    print("Total trainable params in policy object:", n_policy_total)
 
-print("DQN inference params:", n_infer, breakdown_infer)
-print("DQN training-step params:", n_train, breakdown_train)
-print("Total trainable params in policy object:", n_policy_total)
+
+if __name__ == "__main__":
+    main()
+
 
 # %%

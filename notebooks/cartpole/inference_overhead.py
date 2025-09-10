@@ -24,23 +24,23 @@ from typing import Callable, Iterable
 import numpy as np
 import torch
 import yaml
-
-# Relative import of CCNN utilities from this folder
-from ccnn import _compute_correction, calibrate_ccnn
 from sklearn.preprocessing import StandardScaler
 from stable_baselines3 import DQN
 
-from crl.cons._type import ScoringMethod
-from crl.cons.agents import learn_dqn_policy
-from crl.cons.calib import (
+from crl.agents import learn_dqn_policy
+from crl.calib import (
     collect_transitions,
     compute_corrections,
     fill_calib_sets,
     fill_calib_sets_mc,
     signed_score,
 )
-from crl.cons.discretise import build_tile_coding
-from crl.cons.env import instantiate_eval_env
+
+# Relative import of CCNN utilities from this folder
+from crl.ccnn import calibrate_ccnn
+from crl.discretise import build_tile_coding
+from crl.env import instantiate_eval_env
+from crl.types import ScoringMethod
 
 # =========================
 # Top-level configuration

@@ -20,9 +20,8 @@ import numpy as np
 from stable_baselines3 import DQN
 from tqdm import tqdm
 
-from crl.cons._type import AgentTypes, ClassicControl, ScoringMethod
-from crl.cons.agents import learn_cqldqn_policy, learn_ddqn_policy, learn_dqn_policy
-from crl.cons.calib import (
+from crl.agents import learn_cqldqn_policy, learn_ddqn_policy, learn_dqn_policy
+from crl.calib import (
     collect_transitions,
     compute_corrections,
     correction_for,
@@ -30,8 +29,9 @@ from crl.cons.calib import (
     fill_calib_sets_mc,
     signed_score,
 )
-from crl.cons.discretise import build_tile_coding
-from crl.cons.env import instantiate_eval_env
+from crl.discretise import build_tile_coding
+from crl.env import instantiate_eval_env
+from crl.types import AgentTypes, ClassicControl, ScoringMethod
 from crl.utils.graphing import despine
 
 # prevent deprecation spam when using Lunar Lander

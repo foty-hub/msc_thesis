@@ -14,13 +14,13 @@ from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import VecEnv
 from tqdm import tqdm
 
-from crl.cons.agents import learn_dqn_policy
-from crl.cons.buffer import ReplayBuffer, Transition
-from crl.cons.calib import (
+from crl.agents import learn_dqn_policy
+from crl.buffer import ReplayBuffer, Transition
+from crl.calib import (
     collect_transitions,
     signed_score,
 )
-from crl.cons.env import instantiate_eval_env
+from crl.env import instantiate_eval_env
 from crl.utils.graphing import despine
 
 # fmt: off

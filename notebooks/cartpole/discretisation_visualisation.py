@@ -1,14 +1,14 @@
 # %%
 import matplotlib.pyplot as plt
 import numpy as np
-from ccnn import calibrate_ccnn
 from matplotlib.colors import Normalize
 from matplotlib.patches import Rectangle
 from sklearn.neighbors import KDTree
 
-from crl.cons.agents import learn_dqn_policy
-from crl.cons.calib import collect_transitions, signed_score
-from crl.cons.discretise import (
+from crl.agents import learn_dqn_policy
+from crl.calib import collect_transitions, signed_score
+from crl.ccnn import calibrate_ccnn
+from crl.discretise import (
     compute_bin_ranges,
     run_test_episodes,
 )

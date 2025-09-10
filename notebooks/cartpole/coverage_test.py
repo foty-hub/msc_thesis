@@ -11,15 +11,15 @@ from scipy.stats import beta
 from stable_baselines3 import DQN
 from tqdm import tqdm
 
-from crl.cons.agents import learn_dqn_policy
-from crl.cons.calib import (
+from crl.agents import learn_dqn_policy
+from crl.calib import (
     collect_transitions,
     compute_corrections,
     correction_for,
     fill_calib_sets,
 )
-from crl.cons.discretise import build_tile_coding
-from crl.cons.env import instantiate_eval_env
+from crl.discretise import build_tile_coding
+from crl.env import instantiate_eval_env
 from crl.utils.graphing import despine
 
 # %%

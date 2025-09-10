@@ -10,7 +10,7 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.monitor import Monitor
 from tqdm import tqdm
 
-from crl.cons.agents.cql import CQLDQN
+from crl.agents.cql import CQLDQN
 
 # Cartpole args
 dqn_args = {
