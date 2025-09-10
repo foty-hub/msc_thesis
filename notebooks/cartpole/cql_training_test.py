@@ -13,20 +13,20 @@ from tqdm import tqdm
 from crl.cons.agents.cql import CQLDQN
 
 # Cartpole args
-# dqn_args = {
-#     "policy": "MlpPolicy",
-#     "learning_rate": 2.3e-3,
-#     "batch_size": 64,
-#     "learning_starts": 1_000,
-#     "buffer_size": 100000,
-#     "train_freq": 256,
-#     "gamma": 0.99,
-#     "target_update_interval": 10,  # gradient‑step interval
-#     "gradient_steps": 128,
-#     "exploration_fraction": 0.16,
-#     "exploration_final_eps": 0.04,
-#     "policy_kwargs": dict(net_arch=[256, 256]),
-# }
+dqn_args = {
+    "policy": "MlpPolicy",
+    "learning_rate": 3e-4,
+    "batch_size": 64,
+    "learning_starts": 1_000,
+    "buffer_size": 100000,
+    "train_freq": 256,
+    "gamma": 0.99,
+    "target_update_interval": 10,  # gradient‑step interval
+    "gradient_steps": 128,
+    "exploration_fraction": 0.16,
+    "exploration_final_eps": 0.04,
+    "policy_kwargs": dict(net_arch=[256, 256]),
+}
 
 # # MountainCar args
 # dqn_args = {
@@ -45,28 +45,28 @@ from crl.cons.agents.cql import CQLDQN
 # }
 
 
-# Lunar Lander args
-dqn_args = {
-    "policy": "MlpPolicy",
-    "learning_rate": 6.3e-4,
-    "batch_size": 128,
-    "buffer_size": 50000,
-    "learning_starts": 0,
-    "gamma": 0.99,
-    "target_update_interval": 250,
-    "train_freq": 4,
-    "gradient_steps": -1,
-    "exploration_fraction": 0.12,
-    "exploration_final_eps": 0.1,
-    "policy_kwargs": dict(net_arch=[256, 256]),
-}
+# # Lunar Lander args
+# dqn_args = {
+#     "policy": "MlpPolicy",
+#     "learning_rate": 6.3e-4,
+#     "batch_size": 128,
+#     "buffer_size": 50000,
+#     "learning_starts": 0,
+#     "gamma": 0.99,
+#     "target_update_interval": 250,
+#     "train_freq": 4,
+#     "gradient_steps": -1,
+#     "exploration_fraction": 0.12,
+#     "exploration_final_eps": 0.1,
+#     "policy_kwargs": dict(net_arch=[256, 256]),
+# }
 
 
 def single_steps_experiment(train_steps: int, log_dir: str) -> list[dict[str, Any]]:
     exp_results = []
     # for alpha in tqdm(np.arange(0.0, 2.1, 0.1), leave=False, desc=f"{train_steps:,}"):
-    for alpha in tqdm([0.0, 0.1, 0.5, 1.0, 2.0], leave=False):
-        env = gym.make("LunarLander-v3")
+    for alpha in tqdm([0.0, 1.0, 2.0], leave=False):
+        env = gym.make("CartPole-v1")
         env = Monitor(env, log_dir)
         agent = CQLDQN(
             env=env,
@@ -105,7 +105,7 @@ def single_steps_experiment(train_steps: int, log_dir: str) -> list[dict[str, An
 # %%
 
 all_results = []
-for train_steps in [100_000]:
+for train_steps in [50_000, 75_000, 100_000]:
     temp_dir = os.environ["TMPDIR"]  # macos temporary logging dir
     log_dir = f"{temp_dir}/gym/"
     os.makedirs(log_dir, exist_ok=True)
@@ -127,4 +127,8 @@ for train_steps in [100_000]:
 
     #     agent.learn(total_timesteps=timesteps, progress_bar=True)
 
+# %%
+# Save results to pickle file
+with open("cql_results_withreturns.pkl", "wb") as f:
+    pickle.dump(all_results, f)
 # %%
