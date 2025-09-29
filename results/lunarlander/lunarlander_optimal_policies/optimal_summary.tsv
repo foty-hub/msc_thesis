@@ -1,0 +1,17 @@
+param	value	best_seed	best_mean_return	best_std_return
+gravity	-16.0	0	124.783	122.051
+gravity	-15.0	0	181.618	105.399
+gravity	-14.0	2	158.694	92.123
+gravity	-13.0	0	239.203	89.758
+gravity	-12.0	3	188.823	117.425
+gravity	-11.0	3	159.220	83.332
+gravity	-10.0	1	191.398	105.935
+gravity	-9.0	3	261.970	50.326
+gravity	-8.0	3	266.625	34.475
+gravity	-7.0	3	250.477	64.336
+gravity	-6.0	4	256.466	50.293
+gravity	-5.0	4	251.165	54.235
+gravity	-4.0	2	218.687	92.802
+gravity	-3.0	0	176.905	115.549
+gravity	-2.0	3	125.135	142.833
+gravity	-1.0	0	93.230	188.475

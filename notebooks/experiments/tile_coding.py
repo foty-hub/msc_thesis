@@ -12,7 +12,7 @@ from crl.calib import (
     collect_transitions,
     compute_corrections,
     correction_for,
-    fill_calib_sets,
+    fill_calib_sets_td,
 )
 from crl.discretise import build_tile_coding
 from crl.env import instantiate_eval_env
@@ -93,7 +93,7 @@ tiling_settings = [
 all_returns = []
 for tiling in tqdm(tiling_settings):
     discretise, n_discrete_states = build_tile_coding(model, vec_env, **tiling)
-    calib_sets = fill_calib_sets(model, buffer, discretise, n_discrete_states)
+    calib_sets = fill_calib_sets_td(model, buffer, discretise, n_discrete_states)
     qhats, visits = compute_corrections(calib_sets, alpha=0.1, min_calib=50)
 
     lengths = np.linspace(0.1, 2.0, 21)

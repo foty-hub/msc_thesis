@@ -31,8 +31,8 @@ from crl.agents import learn_dqn_policy
 from crl.calib import (
     collect_transitions,
     compute_corrections,
-    fill_calib_sets,
     fill_calib_sets_mc,
+    fill_calib_sets_td,
     signed_score,
 )
 
@@ -242,7 +242,7 @@ def _calibrate_disc(
     discretise, n_features = build_tile_coding(model, vec_env, tiles, tilings)
     buffer = collect_transitions(model, vec_env, n_transitions=n_calib_steps)
     if scoring_method == "td":
-        calib_sets = fill_calib_sets(
+        calib_sets = fill_calib_sets_td(
             model, buffer, discretise, n_features, score=score_fn
         )
     elif scoring_method == "monte_carlo":
