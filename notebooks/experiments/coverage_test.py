@@ -15,7 +15,7 @@ from crl.calib import (
     collect_transitions,
     compute_corrections,
     correction_for,
-    fill_calib_sets,
+    fill_calib_sets_td,
 )
 from crl.discretise import build_tile_coding
 from crl.env import instantiate_eval_env
@@ -151,7 +151,7 @@ def run_single_seed_experiment(seed: int) -> dict[str, Any]:
         model, vec_env, tiles=tiles_cfg, tilings=tilings_cfg
     )
     buffer = collect_transitions(model, vec_env, n_transitions=N_TRANSITIONS)
-    calib_sets = fill_calib_sets(
+    calib_sets = fill_calib_sets_td(
         model, buffer, discretise, n_features, maxlen=MAX_CALIB
     )
     # Add a tiny symmetric jitter to scores before quantile computation to soften ties

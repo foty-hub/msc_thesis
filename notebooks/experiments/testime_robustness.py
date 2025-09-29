@@ -25,8 +25,8 @@ from crl.calib import (
     collect_transitions,
     compute_corrections,
     correction_for,
-    fill_calib_sets,
     fill_calib_sets_mc,
+    fill_calib_sets_td,
     signed_score,
 )
 from crl.discretise import build_tile_coding
@@ -234,7 +234,7 @@ def run_single_seed_experiment(env_name: str, seed: int, cfg: RobustnessConfig):
     n_features = int(n_features)
     buffer = collect_transitions(model, vec_env, n_transitions=cfg.n_calib_steps)
     if cfg.scoring_method == "td":
-        calib_sets = fill_calib_sets(
+        calib_sets = fill_calib_sets_td(
             model,
             buffer,
             discretise,

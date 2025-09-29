@@ -17,8 +17,8 @@ from crl.calib import (
     collect_transitions,
     compute_corrections,
     correction_for,
-    fill_calib_sets,
     fill_calib_sets_mc,
+    fill_calib_sets_td,
     signed_score,
 )
 from crl.discretise import (
@@ -293,7 +293,7 @@ def run_single_seed_experiment(env_name: str, seed: int, cfg: DiscExpConfig):
     # Calibrate corrections for each variant
     for v in variants:
         if cfg.scoring_method == "td":
-            calib_sets = fill_calib_sets(
+            calib_sets = fill_calib_sets_td(
                 model, buffer, v["discretise"], v["n_states"], score=cfg.score_fn
             )
         elif cfg.scoring_method == "monte_carlo":

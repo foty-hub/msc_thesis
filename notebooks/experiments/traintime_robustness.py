@@ -19,8 +19,8 @@ from crl.calib import (
     collect_transitions,
     compute_corrections,
     correction_for,
-    fill_calib_sets,
     fill_calib_sets_mc,
+    fill_calib_sets_td,
     signed_score,
 )
 from crl.ccnn import calibrate_ccnn, run_ccnn_experiment
@@ -33,13 +33,13 @@ from crl.utils.graphing import despine
 warnings.filterwarnings("ignore", category=UserWarning)
 
 # fmt: off
-ALPHA_DISC = 0.01           # Conformal prediction miscoverage level (discrete algo)
+ALPHA_DISC = 0.25           # Conformal prediction miscoverage level (discrete algo)
 ALPHA_NN = 0.1              # Conformal prediction miscoverage level (nearest neighbour algo)
 CQL_ALPHA = 0.05
-MIN_CALIB = 50              # Minimum threshold for a calibration set to be leveraged
+MIN_CALIB = 80              # Minimum threshold for a calibration set to be leveraged
 NUM_EXPERIMENTS = 25
 NUM_EVAL_EPISODES = 250
-N_CALIB_STEPS = 10_000
+N_CALIB_STEPS = 2_500
 N_TRAIN_STEPS = 50_000
 K = 50
 SCORING_METHOD: ScoringMethod = 'td'
@@ -47,6 +47,7 @@ AGENT_TYPE: AgentTypes = 'vanilla'
 SCORE_FN = signed_score
 RETRAIN = False
 CALIB_METHODS: list[CalibMethods] = ['nocalib', 'ccdisc', 'ccnn']
+# CALIB_METHODS: list[CalibMethods] = ['ccdisc']
 CCNN_MAX_DISTANCE_QUANTILE = 0.9
 
 
@@ -70,6 +71,8 @@ class RobustnessConfig:
     retrain: bool = RETRAIN
     calib_methods: list[CalibMethods] = field(default_factory=lambda: CALIB_METHODS.copy())
     ccnn_max_distance_quantile: float = CCNN_MAX_DISTANCE_QUANTILE
+    debug_serial: bool = False
+    debug_seed: int | None = 0
 
 
 # fmt: on
@@ -91,7 +94,7 @@ EVAL_PARAMETERS = {
     "Acrobot-v1": ("LINK_LENGTH_1", np.linspace(0.5, 2.0, 16), 6, 1),
     # MountainCar: vary gravity around default 0.0025
     "MountainCar-v0": ("gravity", np.arange(0.001, 0.005 + 0.00025, 0.00025), 10, 1),
-    "LunarLander-v3": ("gravity", np.arange(-12, -0, 0.5), 4, 4),
+    "LunarLander-v3": ("gravity", np.arange(-16.0, 0.0, 1.0), 4, 1),
 }
 
 
@@ -102,19 +105,15 @@ def run_eval(
     conformalise: bool,
     ep_env: gym.Env,
     qhats: np.ndarray,
-    visits: np.ndarray,
-    agg: str = "max",
-    clip_correction: bool = False,
 ) -> list[float]:
     episodic_returns = []
-    all_occupancies = []
+    fallback = qhats["fallback"]
 
     # Determine number of discrete actions
     num_actions = getattr(ep_env.action_space, "n")
 
     for ep in range(num_eps):
         obs = ep_env.reset()
-        # ep_occupancy = []
         for t in range(1000):
             q_vals = model.q_net(model.policy.obs_to_tensor(obs)[0]).flatten()
 
@@ -122,45 +121,25 @@ def run_eval(
                 # Adjust the qvalues of each action using
                 # the correction from CP
                 for a in range(num_actions):
-                    correction = correction_for(
-                        obs,
-                        a,
-                        qhats,
-                        discretise,
-                        agg=agg,
-                        clip_correction=clip_correction,
-                    )
+                    sa_feature = discretise(obs, a)  # np scalar
+                    correction = qhats.get(sa_feature[0], fallback)
                     q_vals[a] -= correction
 
             action = q_vals.argmax().numpy().reshape(1)
 
-            # The state-visitation count should be for the state *before* we step
-            # the environment.
-            # occupancy = correction_for(
-            #     obs,
-            #     action,
-            #     visits,
-            #     discretise,
-            #     agg=agg,
-            #     clip_correction=clip_correction,
-            # )
             obs, reward, done, info = ep_env.step(action)
-
-            # ep_occupancy.append(occupancy)
 
             if done:
                 ep_return = info[0]["episode"]["r"]
                 episodic_returns.append(ep_return)
                 break
 
-        # all_occupancies.append(ep_occupancy)
-    return episodic_returns, all_occupancies
+    return episodic_returns
 
 
 def run_shift_experiment(
     model: DQN,
-    qhats: np.ndarray,
-    visits: np.ndarray,
+    qhats: dict[int, float],
     discretise: Callable,
     env_name: str,
     shift_params: dict,
@@ -173,26 +152,24 @@ def run_shift_experiment(
 
     # run an experiment with and without the CP lower-bound correction
     if "ccdisc" in cfg.calib_methods:
-        returns_conf, visits_conf = run_eval(
+        returns_conf = run_eval(
             model,
             discretise,
             num_eps=num_eps,
             conformalise=True,
             ep_env=eval_vec_env,
             qhats=qhats,
-            visits=visits,
         )
         exp_result["returns_conf"] = returns_conf
 
     if "nocalib" in cfg.calib_methods:
-        returns_noconf, visits_noconf = run_eval(
+        returns_noconf = run_eval(
             model,
             discretise,
             num_eps=num_eps,
             conformalise=False,
             ep_env=eval_vec_env,
             qhats=qhats,
-            visits=visits,
         )
         exp_result["returns_noconf"] = returns_noconf
 
@@ -213,11 +190,10 @@ def run_single_seed_experiment(
     discretise, n_features = build_tile_coding(model, vec_env, tiles, tilings)
     buffer = collect_transitions(model, vec_env, n_transitions=cfg.n_calib_steps)
     if cfg.scoring_method == "td":
-        calib_sets = fill_calib_sets(
+        calib_sets = fill_calib_sets_td(
             model,
             buffer,
             discretise,
-            n_features,
             score=cfg.score_fn,
         )
     elif cfg.scoring_method == "monte_carlo":
@@ -225,14 +201,14 @@ def run_single_seed_experiment(
             model,
             buffer,
             discretise,
-            n_features,
             score=cfg.score_fn,
         )
-    qhats, visits = compute_corrections(
+    qhats = compute_corrections(
         calib_sets,
         alpha=cfg.alpha_disc,
         min_calib=cfg.min_calib,
     )
+    # print(f"{len(qhats)} total calibrated features")
 
     ccnn_scores, scaler, tree, max_dist = calibrate_ccnn(
         model,
@@ -255,7 +231,6 @@ def run_single_seed_experiment(
             disc_results = run_shift_experiment(
                 model,
                 qhats,
-                visits,
                 discretise,
                 shift_params=eval_parameters,
                 env_name=env_name,
@@ -453,6 +428,8 @@ def main(
         "disc_tilings": EVAL_PARAMETERS[env_name][3],
         "cql_alpha": cfg.cql_alpha if cfg.agent_type == "cql" else None,
         "calib_methods": cfg.calib_methods,
+        "debug_serial": cfg.debug_serial,
+        "debug_seed": cfg.debug_seed,
     }
 
     # Determine results directory (override env_name if results_out provided)
@@ -471,26 +448,39 @@ def main(
     seeds = list(range(cfg.num_experiments))
     max_workers = min(cfg.num_experiments, os.cpu_count() or 1)
 
-    with ProcessPoolExecutor(max_workers=max_workers) as ex:
-        future_to_seed = {
-            ex.submit(
-                run_single_seed_experiment,
-                env_name,
-                seed,
-                cfg,
-            ): seed
-            for seed in seeds
-        }
+    if cfg.debug_serial:
+        # Run a single seed synchronously for debugging (easy to attach a debugger)
+        debug_seed = cfg.debug_seed if cfg.debug_seed is not None else seeds[0]
+        single_exp_result = run_single_seed_experiment(env_name, debug_seed, cfg)
+        # Plot per-seed robustness in the main process to avoid conflicts
+        plot_robustness(debug_seed, single_exp_result, env_name, cfg, exp_dir)
+        all_results.append({"seed": debug_seed, "results": single_exp_result})
+        # Persist incrementally as results arrive
+        with open(os.path.join(exp_dir, "robustness_experiment.pkl"), "wb") as f:
+            pickle.dump(all_results, f)
+    else:
+        with ProcessPoolExecutor(max_workers=max_workers) as ex:
+            future_to_seed = {
+                ex.submit(
+                    run_single_seed_experiment,
+                    env_name,
+                    seed,
+                    cfg,
+                ): seed
+                for seed in seeds
+            }
 
-        for future in as_completed(future_to_seed):
-            seed = future_to_seed[future]
-            single_exp_result = future.result()
-            # Plot per-seed robustness in the main process to avoid conflicts
-            plot_robustness(seed, single_exp_result, env_name, cfg, exp_dir)
-            all_results.append({"seed": seed, "results": single_exp_result})
-            # Persist incrementally as results arrive
-            with open(os.path.join(exp_dir, "robustness_experiment.pkl"), "wb") as f:
-                pickle.dump(all_results, f)
+            for future in as_completed(future_to_seed):
+                seed = future_to_seed[future]
+                single_exp_result = future.result()
+                # Plot per-seed robustness in the main process to avoid conflicts
+                plot_robustness(seed, single_exp_result, env_name, cfg, exp_dir)
+                all_results.append({"seed": seed, "results": single_exp_result})
+                # Persist incrementally as results arrive
+                with open(
+                    os.path.join(exp_dir, "robustness_experiment.pkl"), "wb"
+                ) as f:
+                    pickle.dump(all_results, f)
 
     return all_results
 
@@ -499,14 +489,16 @@ if __name__ == "__main__":
     # envs = ["CartPole-v1", "Acrobot-v1", "MountainCar-v0"]
     # env = "CartPole-v1"
     # env = "LunarLander-v3"
-    env = "CartPole-v1"
     cfg = RobustnessConfig()
-    if env == "MountainCar-v0":
-        assert cfg.n_train_steps == 120_000
-    elif env == "Acrobot-v1":
-        assert cfg.n_train_steps == 100_000
-    elif env == "CartPole-v1":
-        assert cfg.n_train_steps in [50_000, 100_000]
-    main(env_name=env, config=cfg)
+    env = "LunarLander-v3"
+    # cfg = RobustnessConfig(debug_serial=True, debug_seed=0)
+    main(env_name="LunarLander-v3", config=cfg)
+    # if env == "MountainCar-v0":
+    #     assert cfg.n_train_steps == 120_000
+    # elif env == "Acrobot-v1":
+    #     assert cfg.n_train_steps == 100_000
+    # elif env == "CartPole-v1":
+    #     assert cfg.n_train_steps in [50_000, 100_000]
+    # main(env_name=env, config=cfg)
 
 # %%
