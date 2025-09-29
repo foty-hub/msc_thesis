@@ -136,44 +136,49 @@ def unsigned_score(y_pred, y_true) -> np.ndarray:
     return np.abs(signed_score(y_pred, y_true))
 
 
-def fill_calib_sets(
+def fill_calib_sets_td(
     model: DQN,
     buffer: ReplayBuffer,
     discretise: Callable,
-    n_discrete_states: int,
     maxlen: int = 500,
     score: Callable = signed_score,
 ):
-    calib_sets = {}
-    for (sa,) in np.ndindex((n_discrete_states)):
-        calib_sets[sa] = dict(
-            y_preds=deque(maxlen=maxlen),
-            y_trues=deque(maxlen=maxlen),
-            scores=deque(maxlen=maxlen),
-        )
+    """Build calibration sets lazily for encountered indices."""
+    calib_sets: dict[int, dict[str, deque]] = {}
 
-    # now construct the calibration sets
     discount = model.gamma
     for trans in buffer[:-1]:
-        # extract a transition and add it to the calibration set
         with torch.no_grad():
-            q_pred = model.q_net(model.policy.obs_to_tensor(trans.state)[0])
-            y_pred = q_pred[0, trans.action]
+            # Prepare tensors and scalar indices
+            obs_tensor = model.policy.obs_to_tensor(trans.state)[0]
+            q_pred = model.q_net(obs_tensor)
+
+            act_scalar = int(np.asarray(trans.action).reshape(-1)[0])
+            y_pred_val = float(q_pred[0, act_scalar].detach().cpu().numpy())
+
             # Value of the terminal state is 0 by definition.
-            if trans.done:
-                y_true = trans.reward
+            done_bool = bool(np.asarray(trans.done).reshape(-1)[0])
+            reward_val = float(np.asarray(trans.reward).reshape(-1)[0])
+            if done_bool:
+                y_true_val = reward_val
             else:
-                q_true = model.q_net(model.policy.obs_to_tensor(trans.next_state)[0])
-                y_true = trans.reward[0] + discount * q_true[0, trans.next_action]
+                next_obs_tensor = model.policy.obs_to_tensor(trans.next_state)[0]
+                q_true = model.q_net(next_obs_tensor)
+                next_act_scalar = int(np.asarray(trans.next_action).reshape(-1)[0])
+                y_true_val = reward_val + float(discount) * float(
+                    q_true[0, next_act_scalar].detach().cpu().numpy()
+                )
 
             obs_disc = discretise(trans.state, trans.action)
 
-            # iterate over the discrete
             for idx in obs_disc:
                 idx = int(idx)
-                calib_sets[idx]["y_preds"].append(y_pred)
-                calib_sets[idx]["y_trues"].append(y_true)
-                calib_sets[idx]["scores"].append(score(y_pred, y_true))
+                if idx not in calib_sets:
+                    calib_sets[idx] = dict(
+                        scores=deque(maxlen=maxlen),
+                    )
+                s = np.float32(score(y_pred_val, y_true_val))
+                calib_sets[idx]["scores"].append(s)
 
     return calib_sets
 
@@ -182,7 +187,6 @@ def fill_calib_sets_mc(
     model: DQN,
     buffer: ReplayBuffer,
     discretise: Callable,
-    n_discrete_states: int,
     maxlen: int = 500,
     score: Callable = signed_score,
 ):
@@ -193,14 +197,8 @@ def fill_calib_sets_mc(
 
     Parameters mirror `fill_calib_sets`.
     """
-    # Initialise per-(state, action) deques
-    calib_sets = {}
-    for (sa,) in np.ndindex((n_discrete_states)):
-        calib_sets[sa] = dict(
-            y_preds=deque(maxlen=maxlen),
-            y_trues=deque(maxlen=maxlen),
-            scores=deque(maxlen=maxlen),
-        )
+    # Lazily allocate per-index deques on first use
+    calib_sets: dict[int, dict[str, deque]] = {}
 
     discount = model.gamma
 
@@ -255,21 +253,23 @@ def fill_calib_sets_mc(
             obs_disc = discretise(trans.state, trans.action)
             for idx in obs_disc:
                 idx = int(idx)
-                calib_sets[idx]["y_preds"].append(y_pred_val)
-                calib_sets[idx]["y_trues"].append(y_true_val)
-                calib_sets[idx]["scores"].append(score(y_pred_val, y_true_val))
+                if idx not in calib_sets:
+                    calib_sets[idx] = dict(
+                        scores=deque(maxlen=maxlen),
+                    )
+                s = np.float32(score(y_pred_val, y_true_val))
+                calib_sets[idx]["scores"].append(s)
 
     return calib_sets
 
 
 def compute_corrections(calib_sets: dict, alpha: float, min_calib: int):
-    qhats = np.full(len(calib_sets), fill_value=np.nan)
-    visits = np.zeros_like(qhats)
-    qhat_global = 0
+    # qhats = np.full(len(calib_sets), fill_value=np.nan)
+    qhats: dict[int, float] = {}
+    qhat_fallback = 0
 
     for sa, regressor in calib_sets.items():
-        n_calib = len(regressor["y_preds"])
-        visits[sa] = n_calib
+        n_calib = len(regressor["scores"])  # only scores are stored
         if n_calib < min_calib:
             continue
 
@@ -279,12 +279,12 @@ def compute_corrections(calib_sets: dict, alpha: float, min_calib: int):
 
         qhats[sa] = qhat
         # Set a global, pessimistic correction for un-visited state action pairs.
-        if qhat > qhat_global:
-            qhat_global = qhat
+        if qhat > qhat_fallback:
+            qhat_fallback = qhat
 
     # Set all the biggest offsets in place
-    np.nan_to_num(qhats, nan=qhat_global, copy=False)
-    return qhats, visits
+    qhats["fallback"] = qhat_fallback
+    return qhats
 
 
 def correction_for(
