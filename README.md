@@ -16,7 +16,7 @@ Otherwise, the following default pip install should work (not yet tested):
 
 ## Repo Structure
 
-Currently, all the experiments live in notebooks in the `notebooks/` dir. These are being moved into proper `.py` files as the structure begins to coalesce.
+Currently, all the experiments live in notebooks in the `notebooks/experiments` dir. These are being moved into proper `.py` files as the structure begins to coalesce. The primary notebook is `traintime_robustness.py`, which implements and tests conformal calibration. A single-file reference implementation is on the roadmap.
 
 
 ## Tests
