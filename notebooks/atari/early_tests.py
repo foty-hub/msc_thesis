@@ -333,7 +333,8 @@ def run_eval_loop(num_eps: int = 5, modes: Iterable[int] = range(0, 45, 4)):
 
 
 if __name__ == "__main__":
-    run_eval_loop(num_eps=25, modes=[0])
+    # run_eval_loop(num_eps=1, modes=[0])
+    episodic_returns = run_eval_loop(num_eps=15)
 
 # for mode in range(0, 45, 4):
 #     ep_env = make_atari_env(
@@ -384,6 +385,7 @@ if __name__ == "__main__":
 # import pickle
 
 # results = {"baseline": normal_episodic_returns, "ccnn": episodic_returns}
-# with open("ccnn_no_tuning_comparison_vectorised.pkl", "wb") as f:
-#     pickle.dump(results, f)
+with open("ccnn_no_tuning_activations_plus_faiss.pkl", "wb") as f:
+    results = {'ccnn-faiss-approximations': episodic_returns}
+    pickle.dump(results, f)
 # %%

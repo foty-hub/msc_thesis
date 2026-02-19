@@ -26,3 +26,5 @@ results/**/*.pkl
 results/**/*.yaml
 models/
 results/lunarlander/**/*.pdf
+*.pt
+*.lprof

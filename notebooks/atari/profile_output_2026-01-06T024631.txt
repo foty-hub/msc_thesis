@@ -1,0 +1,54 @@
+Timer unit: 1e-09 s
+
+Total time: 204.753 s
+File: /Users/alexinch/Desktop/noodling/msc_thesis/notebooks/atari/early_tests.py
+Function: run_eval_loop at line 206
+
+Line #      Hits         Time  Per Hit   % Time  Line Contents
+==============================================================
+   206                                           @line_profiler.profile
+   207                                           def run_eval_loop(num_eps: int = 5, modes: Iterable[int] = range(0, 45, 4)):
+   208         1       2000.0   2000.0      0.0      episodic_returns = defaultdict(list)
+   209                                           
+   210         2       6000.0   3000.0      0.0      for mode in modes:
+   211         2   34107000.0 1.71e+07      0.0          ep_env = make_atari_env(
+   212         1       1000.0   1000.0      0.0              ENV_ID, n_envs=1, seed=SEED + 1, env_kwargs={"difficulty": 0, "mode": mode}
+   213                                                   )
+   214         1     811000.0 811000.0      0.0          ep_env = VecFrameStack(ep_env, n_stack=4)
+   215         2          0.0      0.0      0.0          for ep in range(num_eps):
+   216         1   38074000.0 3.81e+07      0.0              obs = ep_env.reset()
+   217         1          0.0      0.0      0.0              ep_return = 0.0
+   218         1      18000.0  18000.0      0.0              print(f"Episode No. {ep + 1} (Calibrated) [{mode}]")
+   219         2   16791000.0  8.4e+06      0.0              with tqdm(leave=False) as pbar:
+   220      1925     566000.0    294.0      0.0                  while True:
+   221      3850   35058000.0   9106.0      0.0                      with torch.inference_mode():
+   222      1925  203456000.0 105691.4      0.1                          obs_tensor = model.policy.obs_to_tensor(obs)[0]
+   223      1925 1099686000.0 571265.5      0.5                          q_vals = model.q_net(obs_tensor).flatten()
+   224                                           
+   225                                                               # Adjust the qvalues of each action using a single NN lookup.
+   226      1925    7989000.0   4150.1      0.0                      actions = np.arange(num_actions, dtype=np.int64)
+   227      1925   72375000.0  37597.4      0.0                      sa_features = _sa_feature(obs, actions)
+   228      1925  521635000.0 270979.2      0.3                      sa_features = scaler.transform(sa_features)
+   229      1925     2.01e+11 1.04e+08     98.0                      dists, ids = tree.query(sa_features, k=cfg.k)
+   230                                           
+   231      1925   38626000.0  20065.5      0.0                      too_far = np.max(dists, axis=1) > max_dist
+   232      1925    3170000.0   1646.8      0.0                      corrections = np.empty(num_actions, dtype=np.float32)
+   233      1925    4587000.0   2382.9      0.0                      corrections[too_far] = fallback_value
+   234      6205   31120000.0   5015.3      0.0                      for idx in np.flatnonzero(~too_far):
+   235      4280    3903000.0    911.9      0.0                          neighbour_scores = scores[ids[idx]]
+   236      8560  201958000.0  23593.2      0.1                          corrections[idx] = _compute_correction(
+   237      4280    1025000.0    239.5      0.0                              neighbour_scores, alpha=alpha
+   238                                                                   )
+   239      1925   47169000.0  24503.4      0.0                      q_vals = q_vals - torch.as_tensor(corrections, device=q_vals.device)
+   240                                           
+   241                                                               # take the action
+   242      1925   25851000.0  13429.1      0.0                      action = np.array([int(q_vals.argmax().item())])
+   243      1925 1538403000.0 799170.4      0.8                      obs, reward, done, info = ep_env.step(action)
+   244      1925    2349000.0   1220.3      0.0                      ep_return += float(np.asarray(reward).reshape(-1)[0])
+   245      1925  124341000.0  64592.7      0.1                      pbar.update(1)
+   246      1925     851000.0    442.1      0.0                      if done and (info[0].get("lives", 0) == 0):
+   247         1       7000.0   7000.0      0.0                          episodic_returns[mode].append(ep_return)
+   248         1       1000.0   1000.0      0.0                          break
+   249         1          0.0      0.0      0.0      return episodic_returns
+
+204.75 seconds - /Users/alexinch/Desktop/noodling/msc_thesis/notebooks/atari/early_tests.py:206 - run_eval_loop
