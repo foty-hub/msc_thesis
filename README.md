@@ -1,36 +1,80 @@
-# Conformal Prediction for RL - MSc Thesis
+# Conformal calibration for reinforcement learning
 
-## Installation
-I strongly recommend the use of `uv` to manage dependencies - download [here](https://docs.astral.sh/uv/):
+Research code for sparse-grid conformal calibration of value-based reinforcement
+learning policies. The current paper-facing implementation fits a state-action
+grid from nominal-policy rollouts, estimates conformal corrections from a
+disjoint calibration rollout, and evaluates the corrected greedy policy under
+controlled dynamics shifts.
+
+The maintained experiment currently covers Gymnasium classic-control
+environments with DQN, Double DQN, and CQL-DQN. MinAtar, actor–critic support,
+and reporting relative to per-shift reference policies are planned extensions,
+not implemented paper results.
+
+## Setup
+
+The project requires Python 3.12 or newer and uses
+[`uv`](https://docs.astral.sh/uv/):
+
 ```bash
->>> uv sync
->>> uv pip install -e .
+uv sync
 ```
 
-Otherwise, the following default pip install should work (not yet tested):
+Optional analysis and notebook dependencies can be installed with:
+
 ```bash
->>> python -m venv .venv
->>> source .venv/bin/activate
->>> pip install .
-``` 
+uv sync --group analysis --group notebooks
+```
 
-## Repo Structure
+Trained policies are cached under `models/` by default. Set `MODELS_DIR` in a
+local `.env` file to use another location.
 
-Currently, all the experiments live in notebooks in the `notebooks/experiments` dir. These are being moved into proper `.py` files as the structure begins to coalesce. The primary notebook is `traintime_robustness.py`, which implements and tests conformal calibration. A single-file reference implementation is on the roadmap.
+## Validate the core method
 
+Run the deterministic unit and end-to-end smoke tests:
 
-## Tests
 ```bash
->>> uv run pytest
+uv run pytest -q
 ```
 
-## Models Directory
-- Configure a single models cache root via `.env` with `MODELS_DIR`.
-- `MODELS_DIR` may be relative; it is resolved against the project root (the folder containing `pyproject.toml` or `.git`).
-- Defaults to `models/` at the project root if unset.
+Run one seeded CartPole robustness experiment:
 
-Example `.env`:
+```bash
+uv run python notebooks/experiments/cli.py \
+  --env-name CartPole-v1 \
+  --debug-seed 0 \
+  --results-out CartPole-v1/smoke
 ```
-MODELS_DIR=models
+
+Omit `--debug-seed` for the configured multi-seed experiment. Add `--retrain`
+to ignore a cached policy. Results and plots are written beneath `results/`,
+which is intentionally gitignored.
+
+## Per-shift reference policies
+
+The reference-policy runner trains fresh policies directly in every shifted
+environment. It saves raw episode returns and an across-training-seed mean for
+each shift:
+
+```bash
+uv run python notebooks/experiments/optimal_policies.py \
+  CartPole-v1 \
+  --seeds 0 1 2 3 4
 ```
-This resolves to `<repo>/models`, regardless of where you run scripts or notebooks.
+
+These are empirical reference returns, not guarantees of global optimality.
+They are intended to support a normalized-regret robustness metric.
+
+## Repository layout
+
+- `src/crl/calib.py`: transition collection, batched conformity scores, and
+  sparse conformal corrections.
+- `src/crl/discretise/grid.py`: sparse mixed-radix state-action grid.
+- `src/crl/experiment.py`: calibration and paired shift evaluation pipeline.
+- `src/crl/agents/`: DQN, Double DQN, and CQL-DQN training/loading.
+- `src/crl/configs/`: environment-specific DQN hyperparameters.
+- `notebooks/experiments/`: runnable experiment entry points.
+- `tests/crl/`: deterministic unit and end-to-end tests.
+
+Generated models, experiment results, profiles, and local environment files are
+excluded from version control.

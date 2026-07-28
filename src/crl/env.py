@@ -1,5 +1,6 @@
 import gymnasium as gym
-from stable_baselines3 import DQN
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
 from crl.types import ClassicControl
@@ -52,22 +53,23 @@ def instantiate_eval_env(
             - force: float (default: 0.001)
             - gravity: float (default: 0.0025)
     """
-    eval_env = gym.make(env_name)
+    def make_env() -> gym.Env:
+        eval_env = gym.make(env_name)
+        for key, value in kwargs.items():
+            if hasattr(eval_env.unwrapped, key):
+                setattr(eval_env.unwrapped, key, value)
+            else:
+                raise ValueError(
+                    f"Invalid parameter '{key}' for environment '{env_name}'"
+                )
+        if seed is not None:
+            eval_env.action_space.seed(seed)
+            eval_env.observation_space.seed(seed)
+        return Monitor(eval_env)
 
-    # Validate and set custom parameters
-    for key, value in kwargs.items():
-        if hasattr(eval_env.unwrapped, key):
-            setattr(eval_env.unwrapped, key, value)
-        else:
-            raise ValueError(f"Invalid parameter '{key}' for environment '{env_name}'")
-
+    eval_vec_env = DummyVecEnv([make_env])
     if seed is not None:
-        # Seed the environment and its spaces for deterministic roll‑outs
-        eval_env.reset(seed=seed)
-        eval_env.action_space.seed(seed)
-        eval_env.observation_space.seed(seed)
-
-    eval_vec_env = DQN("MlpPolicy", env=eval_env).get_env()
+        eval_vec_env.seed(seed)
     return eval_vec_env
 
 

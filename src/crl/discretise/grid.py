@@ -1,171 +1,136 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Sequence
+
 import numpy as np
-from typing import Callable
-from stable_baselines3 import DQN
-
-from stable_baselines3.common.vec_env.base_vec_env import VecEnv
-
-# Classic Control obs spaces are Boxes in Gymnasium/Gym
-from gymnasium.spaces import Box  # type: ignore
 
 
-def run_test_episodes(model: DQN, vec_env: VecEnv, n_episodes: int = 50):
-    """
-    Run `n_episodes` using a vectorized env (n_envs == 1) and collect per-dimension
-    observation traces. Works for generic Classic Control tasks that expose a
-    1-D Box observation space.
-    """
-    obs_space = vec_env.observation_space
-    n_dims = int(obs_space.shape[0])
-    # Sanity checks
-    assert getattr(vec_env, "num_envs", 1) == 1
-    assert isinstance(obs_space, Box)
-
-    # Generic, index-based labels
-    stats = [{"label": f"dim_{i}", "vals": []} for i in range(n_dims)]
-
-    for _ in range(n_episodes):
-        obs = vec_env.reset()  # shape (1, n_dims)
-
-        # Record initial observation at reset
-        for i in range(n_dims):
-            stats[i]["vals"].append(float(obs[0, i]))
-
-        # Step until episode ends (terminated or truncated)
-        dones = np.array([False], dtype=bool)
-        while not bool(dones[0]):
-            action, _states = model.predict(obs, deterministic=True)
-            obs, rewards, dones, infos = vec_env.step(action)
-            for i in range(n_dims):
-                stats[i]["vals"].append(float(obs[0, i]))
-
-    return stats
+def _normalise_bins(n_bins: int | Sequence[int], n_dims: int) -> np.ndarray:
+    if isinstance(n_bins, int):
+        bins = np.full(n_dims, n_bins, dtype=np.int64)
+    else:
+        bins = np.asarray(n_bins, dtype=np.int64)
+    if bins.shape != (n_dims,):
+        raise ValueError("n_bins must be an int or contain one entry per dimension.")
+    if np.any(bins < 1):
+        raise ValueError("Every grid dimension must contain at least one bin.")
+    return bins
 
 
-def build_tiling(model: DQN, vec_env: VecEnv, state_bins: list[int]):
-    stats = run_test_episodes(model, vec_env)
+def _get_unique_ids(
+    binned_data: np.ndarray,
+    num_bins: np.ndarray,
+) -> np.ndarray:
+    """Encode rows of mixed-radix bin coordinates as stable integer IDs."""
+    binned = np.asarray(binned_data, dtype=np.int64)
+    bins = np.asarray(num_bins, dtype=np.int64)
+    if binned.ndim != 2 or binned.shape[1] != bins.size:
+        raise ValueError("binned_data must have shape (n_samples, n_dimensions).")
 
-    # compute mins and maxes of the tiling according to the quantiles of the distribution
-    maxs, mins = compute_bin_ranges(stats, obs_quantile=0.1, state_bins=state_bins)
-    n_actions = vec_env.action_space.n
-    discretise, n_discrete_states = build_grid_tiling(
-        mins,
-        maxs,
-        state_bins=state_bins,
-        n_actions=n_actions,
-    )
-    return discretise, n_discrete_states
-
-
-def compute_bin_ranges(
-    stats: list[dict[str, str | list]],
-    state_bins: list[int],
-    obs_quantile: float = 0.1,
-) -> tuple[np.ndarray, np.ndarray]:
-    D = len(state_bins)  # dimensionality of the state space
-    maxs = np.zeros(D)
-    mins = np.zeros(D)
-    for dim in range(D):
-        vals = stats[dim]["vals"]
-        mins[dim], maxs[dim] = (
-            np.quantile(vals, obs_quantile),
-            np.quantile(vals, 1 - obs_quantile),
-        )
-
-    return maxs, mins
+    multipliers = np.cumprod(bins[::-1], dtype=np.int64)[:-1][::-1]
+    multipliers = np.append(multipliers, np.int64(1))
+    return binned @ multipliers
 
 
-# Grid Tiling
 def discretise_observation_grid(
     obs: np.ndarray,
     mins: np.ndarray,
     maxs: np.ndarray,
     num_bins: np.ndarray,
 ) -> np.ndarray:
-    """
-    Vectorized function to discretize N-D obs, and return it as an index for a specific tile
-    in the state-space
+    """Map a batch of continuous observations to mixed-radix state IDs."""
+    observations = np.asarray(obs, dtype=float)
+    if observations.ndim == 1:
+        observations = observations[None, :]
 
-    Args:
-        obs (np.ndarray): Observation array of shape ((n_samples), n_dims).
-        mins (np.ndarray): Array of minimums for each dimension, shape (n_dims,).
-        maxs (np.ndarray): Array of maximums for each dimension, shape (n_dims,).
-        num_bins (np.ndarray): Array of bin counts for each dimension, shape (n_dims,).
+    mins_arr = np.asarray(mins, dtype=float)
+    maxs_arr = np.asarray(maxs, dtype=float)
+    bins = np.asarray(num_bins, dtype=np.int64)
+    expected_shape = (bins.size,)
+    if observations.ndim != 2 or observations.shape[1] != bins.size:
+        raise ValueError("obs must have shape (n_samples, n_dimensions).")
+    if mins_arr.shape != expected_shape or maxs_arr.shape != expected_shape:
+        raise ValueError("mins, maxs, and num_bins must have matching shapes.")
 
-    Returns:
-        np.ndarray: Array of tile indices, shape (n_samples,), dtype int.
-    """
+    widths = (maxs_arr - mins_arr) / bins
+    if np.any(widths <= 0) or not np.all(np.isfinite(widths)):
+        raise ValueError("Every grid dimension must have a finite positive width.")
 
-    bin_widths = (maxs - mins) / num_bins
-    scaled_data = (obs - mins) / bin_widths
-    discretized = np.floor(scaled_data)
-    discretised_state = np.clip(discretized, 0, num_bins - 1).astype(int)
-    flattened = get_unique_ids(discretised_state, num_bins)
-    return flattened
-
-
-def get_unique_ids(binned_data, num_bins):
-    """
-    Calculates a unique integer ID for each row of discretized data.
-
-    Args:
-        binned_data (np.ndarray): Array of bin indices, shape (n_samples, n_dims).
-        num_bins (np.ndarray): Array of bin counts for each dimension, shape (n_dims,).
-
-    Returns:
-        np.ndarray: A 1D array of unique IDs, shape (n_samples,).
-    """
-    num_bins = np.asarray(num_bins)
-
-    # Calculate multipliers (strides) for each dimension.
-    # This is equivalent to converting from a mixed-radix number to base 10.
-    # The multipliers are the cumulative product of bin counts from right to left.
-    multipliers = np.cumprod(num_bins[::-1])[:-1][::-1]
-    multipliers = np.append(multipliers, 1)
-
-    # Dot product of each row with multipliers gives the unique ID
-    ids = np.dot(binned_data, multipliers)
-    return ids
+    coordinates = np.floor((observations - mins_arr) / widths)
+    coordinates = np.clip(coordinates, 0, bins - 1).astype(np.int64)
+    return _get_unique_ids(coordinates, bins)
 
 
-def build_grid_tiling(
-    mins: np.ndarray,
-    maxs: np.ndarray,
-    state_bins: list[int],
-    n_actions: int,
-) -> tuple[Callable[[np.ndarray, np.ndarray], int | np.ndarray], int]:
-    """
-    Fixed-width grid discretisation over (state, action).
+@dataclass(frozen=True)
+class GridDiscretiser:
+    """A fitted state-action grid that only materialises visited cell IDs."""
 
-    Parameters
-    ----------
-    buffer      : replay buffer with .state and .action
-    mins, maxs  : lower / upper bounds for the four state variables
-    num_bins    : number of bins per state dimension
+    mins: np.ndarray
+    maxs: np.ndarray
+    num_bins: np.ndarray
+    n_actions: int
 
-    Returns
-    -------
-    ids         : discrete ID for every transition in *buffer*
-    discretise  : callable mapping (obs, act) → ID (scalar or array)
-    n_states    : total number of discrete (state, action) cells
-    """
-    # ---------- build mapping for the existing buffer
-    # states = np.stack([tr.state[0] for tr in buffer])  # (N, 4)
-    # actions = np.asarray([tr.action for tr in buffer], int)  # (N,)
+    @classmethod
+    def fit(
+        cls,
+        observations: np.ndarray,
+        *,
+        n_bins: int | Sequence[int],
+        n_actions: int,
+        obs_quantile: float = 0.1,
+    ) -> GridDiscretiser:
+        obs = np.asarray(observations, dtype=float)
+        if obs.ndim != 2 or obs.shape[0] == 0:
+            raise ValueError("observations must have shape (n_samples, n_dimensions).")
+        if not np.all(np.isfinite(obs)):
+            raise ValueError("Grid fitting observations must all be finite.")
+        if not 0.0 <= obs_quantile < 0.5:
+            raise ValueError("obs_quantile must lie in [0, 0.5).")
+        if n_actions < 1:
+            raise ValueError("n_actions must be positive.")
 
-    # state_ids = discretise_observation_grid(states, mins, maxs, num_bins)
-    # ids = (state_ids * n_actions + actions).tolist()
-    num_bins = np.array(state_bins)
-    n_states = int(np.prod(num_bins)) * n_actions
+        bins = _normalise_bins(n_bins, obs.shape[1])
+        mins = np.quantile(obs, obs_quantile, axis=0)
+        maxs = np.quantile(obs, 1.0 - obs_quantile, axis=0)
 
-    # ---------------- lookup for arbitrary (obs, act)
-    def discretise(obs: np.ndarray, act: np.ndarray | int) -> int | np.ndarray:
-        obs_arr = np.asarray(obs, float).reshape(
-            -1, len(state_bins)
-        )  # ensure (batch,4)
-        act_arr = np.asarray(act, int).reshape(-1)  # ensure (batch,)
+        # Constant dimensions carry no partitioning information but still need
+        # finite widths for a well-defined mapping.
+        scale = np.maximum(np.maximum(np.abs(mins), np.abs(maxs)), 1.0)
+        maxs = np.maximum(maxs, mins + 1e-6 * scale)
+        return cls(mins=mins, maxs=maxs, num_bins=bins, n_actions=n_actions)
 
-        state_batch = discretise_observation_grid(obs_arr, mins, maxs, num_bins)
-        out = state_batch * n_actions + act_arr
-        return out.item() if out.size == 1 else out
+    @property
+    def n_state_cells(self) -> int:
+        return int(np.prod(self.num_bins, dtype=np.int64))
 
-    return discretise, n_states
+    @property
+    def n_state_action_cells(self) -> int:
+        return self.n_state_cells * self.n_actions
+
+    def state_ids(self, observations: np.ndarray) -> np.ndarray:
+        return discretise_observation_grid(
+            observations,
+            self.mins,
+            self.maxs,
+            self.num_bins,
+        )
+
+    def __call__(
+        self,
+        observations: np.ndarray,
+        actions: np.ndarray | Sequence[int] | int,
+    ) -> np.ndarray:
+        state_ids = self.state_ids(observations)
+        action_ids = np.asarray(actions, dtype=np.int64).reshape(-1)
+
+        if state_ids.size == 1 and action_ids.size > 1:
+            state_ids = np.repeat(state_ids, action_ids.size)
+        elif action_ids.size == 1 and state_ids.size > 1:
+            action_ids = np.repeat(action_ids, state_ids.size)
+        elif state_ids.size != action_ids.size:
+            raise ValueError("Observation and action batch sizes are incompatible.")
+
+        if np.any(action_ids < 0) or np.any(action_ids >= self.n_actions):
+            raise ValueError("Action is outside the configured discrete action space.")
+        return state_ids * self.n_actions + action_ids
