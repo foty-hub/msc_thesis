@@ -31,7 +31,6 @@ class RobustnessConfig:
     max_calib_per_cell: int = 500
     num_experiments: int = 25
     num_eval_episodes: int = 25
-    n_grid_steps: int = 2_500
     n_calib_steps: int = 2_500
     n_train_steps: int = 50_000
     obs_quantile: float = 0.1
@@ -76,12 +75,13 @@ def run_single_seed_experiment(
 ) -> dict:
     model, nominal_env = train_agent(env_name, seed, cfg)
     shift_spec = SHIFT_SPECS[env_name]
+
+    # Observe the agent and compute all the calibrations
     calibration = calibrate_grid_policy(
         model,
         nominal_env,
         n_bins=shift_spec.grid_bins,
         config=GridCalibrationConfig(
-            n_grid_steps=cfg.n_grid_steps,
             n_calib_steps=cfg.n_calib_steps,
             alpha=cfg.alpha,
             min_calib=cfg.min_calib,
@@ -92,6 +92,7 @@ def run_single_seed_experiment(
         ),
     )
 
+    # Now use the calibration to evaluate the agent on unseen distribution shifts
     results = [
         evaluate_shift(
             model,

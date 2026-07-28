@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal
 
 import numpy as np
 import torch
@@ -32,6 +31,9 @@ class ShiftSpec:
     grid_bins: int
 
 
+# Defines the distribution shifts evaluated for each environment. For example, the Cartpole
+# spec means we train the model on the nominal value (length = 0.5), then evaluate it on
+# the range of lengths [0.1, 0.3, 0.5, ..., 2.7, 2.9]
 SHIFT_SPECS: dict[ClassicControl, ShiftSpec] = {
     "CartPole-v1": ShiftSpec(
         parameter="length",
@@ -48,8 +50,7 @@ SHIFT_SPECS: dict[ClassicControl, ShiftSpec] = {
     "MountainCar-v0": ShiftSpec(
         parameter="gravity",
         values=tuple(
-            float(value)
-            for value in np.arange(0.001, 0.005 + 0.00025, 0.00025)
+            float(value) for value in np.arange(0.001, 0.005 + 0.00025, 0.00025)
         ),
         nominal_value=0.0025,
         grid_bins=10,
@@ -65,7 +66,6 @@ SHIFT_SPECS: dict[ClassicControl, ShiftSpec] = {
 
 @dataclass(frozen=True)
 class GridCalibrationConfig:
-    n_grid_steps: int = 2_500
     n_calib_steps: int = 2_500
     alpha: float = 0.25
     min_calib: int = 80
@@ -110,17 +110,20 @@ def calibrate_grid_policy(
     n_bins: int,
     config: GridCalibrationConfig,
 ) -> GridCalibration:
-    """Fit a nominal grid and conformal corrections on disjoint rollouts."""
-    grid_buffer = collect_transitions(model, env, config.n_grid_steps)
-    n_actions = int(getattr(env.action_space, "n"))
+    """Fit a nominal grid and conformal corrections from one rollout."""
+    # First observe the agent to collect transitions in the nominal (un-shifted) env
+    calibration_buffer = collect_transitions(model, env, config.n_calib_steps)
+
+    # Defines the grid cell boundaries using a sparse radix encoding (so we don't have
+    # to materialise the whole grid - useful for higher dimensional state spaces).
     discretiser = fit_grid_from_buffer(
-        grid_buffer,
+        calibration_buffer,
         n_bins=n_bins,
-        n_actions=n_actions,
+        n_actions=int(env.action_space.n),
         obs_quantile=config.obs_quantile,
     )
 
-    calibration_buffer = collect_transitions(model, env, config.n_calib_steps)
+    # Given the grid, compute the calibration scores
     if config.scoring_method == "td":
         calibration_sets = fill_calib_sets_td(
             model,
@@ -142,6 +145,7 @@ def calibrate_grid_policy(
     else:
         raise ValueError(f"Unknown scoring method: {config.scoring_method}")
 
+    # Compute corrections using the scores
     corrections = compute_corrections(
         calibration_sets,
         alpha=config.alpha,
@@ -191,10 +195,7 @@ def evaluate_policy(
     calibration: GridCalibration | None,
     max_steps_per_episode: int = 10_000,
 ) -> list[float]:
-    """Evaluate one policy without constructing autograd graphs."""
-    if n_episodes < 1:
-        raise ValueError("n_episodes must be positive.")
-
+    """Evaluate a policy without constructing autograd graphs."""
     returns: list[float] = []
     observation = env.reset()
     episode_return = 0.0

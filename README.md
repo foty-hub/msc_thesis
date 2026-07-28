@@ -1,10 +1,9 @@
 # Conformal calibration for reinforcement learning
 
 Research code for sparse-grid conformal calibration of value-based reinforcement
-learning policies. The current paper-facing implementation fits a state-action
-grid from nominal-policy rollouts, estimates conformal corrections from a
-disjoint calibration rollout, and evaluates the corrected greedy policy under
-controlled dynamics shifts.
+learning policies. The current paper-facing implementation uses a nominal-policy
+rollout to fit a state-action grid and estimate conformal corrections, then
+evaluates the corrected greedy policy under controlled dynamics shifts.
 
 The maintained experiment currently covers Gymnasium classic-control
 environments with DQN, Double DQN, and CQL-DQN. MinAtar, actor–critic support,
@@ -40,7 +39,7 @@ uv run pytest -q
 Run one seeded CartPole robustness experiment:
 
 ```bash
-uv run python notebooks/experiments/cli.py \
+uv run python scripts/cli.py \
   --env-name CartPole-v1 \
   --debug-seed 0 \
   --results-out CartPole-v1/smoke
@@ -57,7 +56,7 @@ environment. It saves raw episode returns and an across-training-seed mean for
 each shift:
 
 ```bash
-uv run python notebooks/experiments/optimal_policies.py \
+uv run python scripts/optimal_policies.py \
   CartPole-v1 \
   --seeds 0 1 2 3 4
 ```
@@ -73,7 +72,7 @@ They are intended to support a normalized-regret robustness metric.
 - `src/crl/experiment.py`: calibration and paired shift evaluation pipeline.
 - `src/crl/agents/`: DQN, Double DQN, and CQL-DQN training/loading.
 - `src/crl/configs/`: environment-specific DQN hyperparameters.
-- `notebooks/experiments/`: runnable experiment entry points.
+- `scripts/`: runnable experiment entry points.
 - `tests/crl/`: deterministic unit and end-to-end tests.
 
 Generated models, experiment results, profiles, and local environment files are

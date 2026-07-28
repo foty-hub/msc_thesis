@@ -174,9 +174,7 @@ def save_results(
         )
         writer.writeheader()
         for summary in summaries:
-            writer.writerow(
-                {key: summary[key] for key in writer.fieldnames}
-            )
+            writer.writerow({key: summary[key] for key in writer.fieldnames})
 
     metadata = {
         **asdict(config),

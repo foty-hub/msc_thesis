@@ -4,7 +4,12 @@ import argparse
 import json
 from dataclasses import asdict
 
-from traintime_robustness import RobustnessConfig, main as run_main
+if __package__:
+    from .traintime_robustness import RobustnessConfig
+    from .traintime_robustness import main as run_main
+else:
+    from traintime_robustness import RobustnessConfig
+    from traintime_robustness import main as run_main
 
 from crl.experiment import SHIFT_SPECS
 
@@ -36,7 +41,6 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=defaults.num_eval_episodes,
     )
-    parser.add_argument("--n-grid-steps", type=int, default=defaults.n_grid_steps)
     parser.add_argument("--n-calib-steps", type=int, default=defaults.n_calib_steps)
     parser.add_argument("--n-train-steps", type=int, default=defaults.n_train_steps)
     parser.add_argument(
@@ -70,7 +74,6 @@ def build_config_from_args(args: argparse.Namespace) -> RobustnessConfig:
         max_calib_per_cell=args.max_calib_per_cell,
         num_experiments=args.num_experiments,
         num_eval_episodes=args.num_eval_episodes,
-        n_grid_steps=args.n_grid_steps,
         n_calib_steps=args.n_calib_steps,
         n_train_steps=args.n_train_steps,
         obs_quantile=args.obs_quantile,

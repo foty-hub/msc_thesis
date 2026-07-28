@@ -5,11 +5,10 @@
 The maintained experiment applies conformal corrections to the action values of
 a trained DQN. It:
 
-1. collects nominal-policy states and fits a fixed state-action grid;
-2. collects a disjoint calibration rollout;
-3. computes TD or Monte Carlo conformity scores;
-4. stores conformal corrections only for visited grid cells; and
-5. compares the original and corrected greedy policies under dynamics shifts.
+1. collects a nominal-policy rollout and fits a fixed state-action grid;
+2. computes TD or Monte Carlo conformity scores from that rollout;
+3. stores conformal corrections only for visited grid cells; and
+4. compares the original and corrected greedy policies under dynamics shifts.
 
 The current implementation covers Gymnasium classic-control environments and
 DQN, Double DQN, and CQL-DQN. CC-NN, FAISS, tile coding, and tree
@@ -20,8 +19,8 @@ The core path is:
 - `src/crl/discretise/grid.py`: grid fitting and state-action cell IDs.
 - `src/crl/calib.py`: rollouts, scores, calibration sets, and quantiles.
 - `src/crl/experiment.py`: calibration, action selection, and shift evaluation.
-- `notebooks/experiments/traintime_robustness.py`: multi-seed experiment.
-- `notebooks/experiments/cli.py`: command-line entry point.
+- `scripts/traintime_robustness.py`: multi-seed experiment.
+- `scripts/cli.py`: command-line entry point.
 - `tests/crl/`: unit and end-to-end regression tests.
 
 The cleanup checkpoint passes the test suite and a deterministic CartPole run.
@@ -39,8 +38,7 @@ Keep a single terminology throughout the code and paper, preferably
 fallback rule. These choices currently live in:
 
 - `GridCalibrationConfig` in `src/crl/experiment.py`;
-- `RobustnessConfig` in
-  `notebooks/experiments/traintime_robustness.py`; and
+- `RobustnessConfig` in `scripts/traintime_robustness.py`; and
 - environment grids and shift ranges in `SHIFT_SPECS`, in
   `src/crl/experiment.py`.
 
@@ -49,7 +47,7 @@ those are the easiest places to silently change the method.
 
 ### 2. Measure performance relative to a policy trained at each shift
 
-`notebooks/experiments/optimal_policies.py` already trains fresh reference
+`scripts/optimal_policies.py` already trains fresh reference
 policies in every shifted environment and stores raw returns. It reports the
 mean across training seeds rather than selecting the luckiest seed.
 
@@ -90,8 +88,8 @@ This will mainly touch:
 - `src/crl/types.py` and `src/crl/configs/` for the new environment; and
 - `pyproject.toml` for MinAtar dependencies.
 
-Keep representation fitting, conformal calibration, and evaluation data
-separate to avoid leakage.
+Keep evaluation data separate from representation fitting and conformal
+calibration.
 
 ### 4. Support an actor–critic policy
 

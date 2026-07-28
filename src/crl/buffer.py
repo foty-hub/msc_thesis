@@ -4,7 +4,7 @@ from collections.abc import Iterator
 import numpy as np
 
 # -----------------------------------------------------------------------------
-# 1. Replay buffer: simple ring buffer (fixed capacity, FIFO eviction)
+# Replay buffer: simple ring buffer (fixed capacity, FIFO)
 # -----------------------------------------------------------------------------
 Transition = namedtuple(
     "Transition", ["state", "action", "reward", "next_state", "next_action", "done"]

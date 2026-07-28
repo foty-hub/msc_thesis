@@ -197,8 +197,8 @@ def compute_mc_scores(
     if batch_size < 1:
         raise ValueError("batch_size must be positive.")
     transitions = _as_transitions(buffer)
-    states, actions, _rewards, _next_states, _next_actions, _dones = (
-        _transition_arrays(transitions)
+    states, actions, _rewards, _next_states, _next_actions, _dones = _transition_arrays(
+        transitions
     )
     returns = compute_mc_returns(transitions, gamma=float(model.gamma))
     scores = np.empty(len(transitions), dtype=np.float32)
@@ -231,16 +231,14 @@ def _fill_calibration_sets(
     if maxlen < 1:
         raise ValueError("maxlen must be positive.")
 
-    states, actions, _rewards, _next_states, _next_actions, _dones = (
-        _transition_arrays(transitions)
+    states, actions, _rewards, _next_states, _next_actions, _dones = _transition_arrays(
+        transitions
     )
     cell_ids = np.asarray(discretise(states, actions), dtype=np.int64)
     if cell_ids.ndim == 1:
         cell_ids = cell_ids[:, None]
     if cell_ids.ndim != 2 or cell_ids.shape[0] != len(transitions):
-        raise ValueError(
-            "discretise must return one row of cell IDs per transition."
-        )
+        raise ValueError("discretise must return one row of cell IDs per transition.")
 
     calibration_sets: CalibrationSets = {}
     for row, value in zip(cell_ids, scores, strict=True):

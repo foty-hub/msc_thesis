@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from stable_baselines3 import DQN
 
+import crl.experiment as experiment_module
 from crl.agents._common import seeded_vec_env
 from crl.discretise import GridDiscretiser
 from crl.experiment import (
@@ -62,7 +63,7 @@ def test_sparse_correction_can_change_the_greedy_action():
     np.testing.assert_allclose(corrections, np.asarray([1.5, 0.0]))
 
 
-def test_cartpole_grid_calibration_pipeline_smoke():
+def test_cartpole_grid_calibration_pipeline_smoke(monkeypatch):
     model = DQN(
         "MlpPolicy",
         "CartPole-v1",
@@ -74,12 +75,23 @@ def test_cartpole_grid_calibration_pipeline_smoke():
     nominal_env = model.get_env()
     assert nominal_env is not None
 
+    collection_sizes = []
+    collect_transitions = experiment_module.collect_transitions
+
+    def record_collection_size(model, env, n_transitions):
+        collection_sizes.append(n_transitions)
+        return collect_transitions(model, env, n_transitions)
+
+    monkeypatch.setattr(
+        experiment_module,
+        "collect_transitions",
+        record_collection_size,
+    )
     calibration = calibrate_grid_policy(
         model,
         nominal_env,
         n_bins=2,
         config=GridCalibrationConfig(
-            n_grid_steps=64,
             n_calib_steps=128,
             alpha=0.2,
             min_calib=1,
@@ -97,6 +109,7 @@ def test_cartpole_grid_calibration_pipeline_smoke():
     )
     nominal_env.close()
 
+    assert collection_sizes == [128]
     assert calibration.n_calibrated_cells > 0
     assert len(result["returns_noconf"]) == 2
     assert len(result["returns_conf"]) == 2
