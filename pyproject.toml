@@ -36,6 +36,9 @@ notebooks = [
     "jupyterlab>=4.4.0",
 ]
 
+[tool.uv]
+default-groups = "all"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/crl"]
 
