@@ -126,6 +126,7 @@ def train_and_evaluate_one(
         "returns": [float(value) for value in returns],
         "episode_lengths": [int(value) for value in episode_lengths],
         "mean_return": float(np.mean(returns)),
+        "max_return": float(np.max(returns)),
     }
 
 
@@ -241,7 +242,7 @@ def parse_args() -> ReferencePolicyConfig:
     parser.add_argument("--seeds", type=int, nargs="+", default=list(range(5)))
     parser.add_argument("--cql-alpha", type=float, default=0.05)
     parser.add_argument("--out")
-    parser.add_argument("--max-workers", type=int, default=4)
+    parser.add_argument("--max-workers", type=int, default=8)
     args = parser.parse_args()
     return ReferencePolicyConfig(
         env_name=args.env,

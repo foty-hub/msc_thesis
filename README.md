@@ -19,22 +19,11 @@ The project requires Python 3.12 or newer and uses
 uv sync
 ```
 
-Optional analysis and notebook dependencies can be installed with:
-
-```bash
-uv sync --group analysis --group notebooks
-```
-
 Trained policies are cached under `models/` by default. Set `MODELS_DIR` in a
 local `.env` file to use another location.
 
-## Validate the core method
 
-Run the deterministic unit and end-to-end smoke tests:
-
-```bash
-uv run pytest -q
-```
+## Run Experiments
 
 Run one seeded CartPole robustness experiment:
 
@@ -77,3 +66,10 @@ They are intended to support a normalized-regret robustness metric.
 
 Generated models, experiment results, profiles, and local environment files are
 excluded from version control.
+
+
+## Tests
+
+```bash
+uv run pytest -q
+```

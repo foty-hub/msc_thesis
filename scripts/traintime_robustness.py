@@ -38,7 +38,7 @@ class RobustnessConfig:
     agent_type: AgentTypes = "vanilla"
     cql_alpha: float = 0.05
     retrain: bool = False
-    max_workers: int = 4
+    max_workers: int = 8
     debug_seed: int | None = None
 
 
