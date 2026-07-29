@@ -25,6 +25,7 @@ dev = [
     "pytest>=8.4.1",
 ]
 analysis = [
+    "optuna>=4.5.0",
     "pandas>=2.3.0",
     "pillow>=11.2.1",
     "rliable>=1.2.0",

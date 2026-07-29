@@ -66,9 +66,9 @@ SHIFT_SPECS: dict[ClassicControl, ShiftSpec] = {
 
 @dataclass(frozen=True)
 class GridCalibrationConfig:
-    n_calib_steps: int = 2_500
+    n_calib_steps: int = 10_000
     alpha: float = 0.25
-    min_calib: int = 80
+    min_calib: int = 100
     max_calib_per_cell: int = 500
     obs_quantile: float = 0.1
     scoring_method: ScoringMethod = "td"
@@ -80,6 +80,7 @@ class GridCalibrationConfig:
 class GridCalibration:
     discretiser: GridDiscretiser
     corrections: Corrections
+    n_visited_cells: int
     n_calibrated_cells: int
     fallback: float
 
@@ -154,6 +155,7 @@ def calibrate_grid_policy(
     return GridCalibration(
         discretiser=discretiser,
         corrections=corrections,
+        n_visited_cells=len(calibration_sets),
         n_calibrated_cells=len(corrections) - 1,
         fallback=float(corrections["fallback"]),
     )

@@ -49,6 +49,12 @@ def parse_args() -> argparse.Namespace:
         default=defaults.obs_quantile,
     )
     parser.add_argument(
+        "--grid-bins",
+        type=int,
+        default=defaults.grid_bins,
+        help="Override the environment's default bins per observation dimension.",
+    )
+    parser.add_argument(
         "--scoring-method",
         choices=["td", "monte_carlo"],
         default=defaults.scoring_method,
@@ -77,6 +83,7 @@ def build_config_from_args(args: argparse.Namespace) -> RobustnessConfig:
         n_calib_steps=args.n_calib_steps,
         n_train_steps=args.n_train_steps,
         obs_quantile=args.obs_quantile,
+        grid_bins=args.grid_bins,
         scoring_method=args.scoring_method,
         agent_type=args.agent_type,
         cql_alpha=args.cql_alpha,

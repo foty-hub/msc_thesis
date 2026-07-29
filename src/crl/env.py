@@ -5,6 +5,18 @@ from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
 from crl.types import ClassicControl
 
+NOMINAL_REWARD_THRESHOLDS: dict[ClassicControl, float] = {
+    "CartPole-v1": 475.0,
+    "Acrobot-v1": -100.0,
+    "MountainCar-v0": -110.0,
+    "LunarLander-v3": 200.0,
+}
+
+
+def nominal_reward_threshold(env_name: ClassicControl) -> float:
+    """Return the mean nominal reward required to retain a policy seed."""
+    return NOMINAL_REWARD_THRESHOLDS[env_name]
+
 
 def instantiate_eval_env(
     env_name: ClassicControl, seed: int | None = None, **kwargs
@@ -53,6 +65,7 @@ def instantiate_eval_env(
             - force: float (default: 0.001)
             - gravity: float (default: 0.0025)
     """
+
     def make_env() -> gym.Env:
         eval_env = gym.make(env_name)
         for key, value in kwargs.items():
@@ -71,10 +84,3 @@ def instantiate_eval_env(
     if seed is not None:
         eval_vec_env.seed(seed)
     return eval_vec_env
-
-
-# "solve" thresholds:
-# CartPole    >  490
-# Acrobot     > -100
-# MountainCar > -110
-# Pendulum    > -200

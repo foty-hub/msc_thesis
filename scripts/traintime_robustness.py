@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import pickle
 import pprint
+import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -27,18 +28,19 @@ from crl.utils.paths import project_root
 @dataclass(frozen=True)
 class RobustnessConfig:
     alpha: float = 0.25
-    min_calib: int = 80
+    min_calib: int = 100
     max_calib_per_cell: int = 500
     num_experiments: int = 25
     num_eval_episodes: int = 25
-    n_calib_steps: int = 2_500
+    n_calib_steps: int = 10_000
     n_train_steps: int = 50_000
     obs_quantile: float = 0.1
+    grid_bins: int | None = None
     scoring_method: ScoringMethod = "td"
     agent_type: AgentTypes = "vanilla"
     cql_alpha: float = 0.05
     retrain: bool = False
-    max_workers: int = 8
+    max_workers: int = 4
     debug_seed: int | None = None
 
 
@@ -73,14 +75,19 @@ def run_single_seed_experiment(
     seed: int,
     cfg: RobustnessConfig,
 ) -> dict:
+    experiment_start = time.perf_counter()
+    train_start = time.perf_counter()
     model, nominal_env = train_agent(env_name, seed, cfg)
+    train_seconds = time.perf_counter() - train_start
     shift_spec = SHIFT_SPECS[env_name]
+    grid_bins = shift_spec.grid_bins if cfg.grid_bins is None else cfg.grid_bins
 
     # Observe the agent and compute all the calibrations
+    calibration_start = time.perf_counter()
     calibration = calibrate_grid_policy(
         model,
         nominal_env,
-        n_bins=shift_spec.grid_bins,
+        n_bins=grid_bins,
         config=GridCalibrationConfig(
             n_calib_steps=cfg.n_calib_steps,
             alpha=cfg.alpha,
@@ -91,8 +98,10 @@ def run_single_seed_experiment(
             score_fn=signed_score,
         ),
     )
+    calibration_seconds = time.perf_counter() - calibration_start
 
     # Now use the calibration to evaluate the agent on unseen distribution shifts
+    evaluation_start = time.perf_counter()
     results = [
         evaluate_shift(
             model,
@@ -105,13 +114,21 @@ def run_single_seed_experiment(
         )
         for value in shift_spec.values
     ]
+    evaluation_seconds = time.perf_counter() - evaluation_start
     nominal_env.close()
     return {
         "seed": seed,
         "calibration": {
+            "n_visited_cells": calibration.n_visited_cells,
             "n_calibrated_cells": calibration.n_calibrated_cells,
             "fallback": calibration.fallback,
             "n_state_action_cells": calibration.discretiser.n_state_action_cells,
+        },
+        "timing_seconds": {
+            "train_or_load": train_seconds,
+            "calibration": calibration_seconds,
+            "evaluation": evaluation_seconds,
+            "total": time.perf_counter() - experiment_start,
         },
         "results": results,
     }
@@ -170,6 +187,11 @@ def main(
     experiment_info = {
         "env": env_name,
         **asdict(cfg),
+        "effective_grid_bins": (
+            SHIFT_SPECS[env_name].grid_bins
+            if cfg.grid_bins is None
+            else cfg.grid_bins
+        ),
         "shift": asdict(SHIFT_SPECS[env_name]),
         "score_fn": "signed_score",
         "calibration_method": "sparse_grid",

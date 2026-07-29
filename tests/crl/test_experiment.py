@@ -44,6 +44,7 @@ def test_sparse_correction_can_change_the_greedy_action():
     calibration = GridCalibration(
         discretiser=grid,
         corrections={0: 1.5, 1: 0.0, "fallback": 1.5},
+        n_visited_cells=2,
         n_calibrated_cells=2,
         fallback=1.5,
     )
@@ -110,6 +111,7 @@ def test_cartpole_grid_calibration_pipeline_smoke(monkeypatch):
     nominal_env.close()
 
     assert collection_sizes == [128]
+    assert calibration.n_visited_cells >= calibration.n_calibrated_cells
     assert calibration.n_calibrated_cells > 0
     assert len(result["returns_noconf"]) == 2
     assert len(result["returns_conf"]) == 2

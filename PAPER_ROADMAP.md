@@ -20,6 +20,7 @@ The core path is:
 - `src/crl/calib.py`: rollouts, scores, calibration sets, and quantiles.
 - `src/crl/experiment.py`: calibration, action selection, and shift evaluation.
 - `scripts/traintime_robustness.py`: multi-seed experiment.
+- `scripts/optuna_tuner.py`: resumable sparse-grid Bayesian optimization.
 - `scripts/cli.py`: command-line entry point.
 - `tests/crl/`: unit and end-to-end regression tests.
 
@@ -41,6 +42,11 @@ fallback rule. These choices currently live in:
 - `RobustnessConfig` in `scripts/traintime_robustness.py`; and
 - environment grids and shift ranges in `SHIFT_SPECS`, in
   `src/crl/experiment.py`.
+
+See [`tuning.md`](tuning.md) for the staged tuning and held-out validation
+protocol, the LunarLander case study, and environment-specific guidance.
+`scripts/optuna_tuner.py` implements the resumable Bayesian optimization
+workflow for the maintained sparse-grid method.
 
 Add tests before changing the cell-ID scheme or conformal quantile calculation;
 those are the easiest places to silently change the method.
