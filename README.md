@@ -1,13 +1,6 @@
-# Conformal calibration for reinforcement learning
+# Conformal Calibration
 
-Research code for sparse-grid conformal calibration of value-based reinforcement
-learning policies. The current paper-facing implementation uses a nominal-policy
-rollout to fit a state-action grid and estimate conformal corrections, then
-evaluates the corrected greedy policy under controlled dynamics shifts.
-
-The maintained experiment covers Gymnasium classic-control environments and
-MinAtar Breakout with DQN, Double DQN, and CQL-DQN. Actor–critic support and
-reporting relative to per-shift reference policies remain planned extensions.
+Repo for my MSc Thesis devising and explaining '[Conformal Calibration](https://www.alexinch.com/assets/pdfs/ucl_msc_thesis.pdf)' - a method for calibrating the Q-function of a DQN-based agent, improving its robustness to domain shift on some tasks.
 
 ## Setup
 
