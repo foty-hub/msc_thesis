@@ -213,16 +213,13 @@ def main(
         "env": env_name,
         **asdict(cfg),
         "effective_grid_bins": (
-            SHIFT_SPECS[env_name].grid_bins
-            if cfg.grid_bins is None
-            else cfg.grid_bins
+            SHIFT_SPECS[env_name].grid_bins if cfg.grid_bins is None else cfg.grid_bins
         ),
         "effective_n_calib_steps": effective_calibration_steps(env_name, cfg),
         "effective_representation_dims": (
             3
             if (
-                env_name == MINATAR_BREAKOUT
-                and cfg.representation_method == "q_values"
+                env_name == MINATAR_BREAKOUT and cfg.representation_method == "q_values"
             )
             else cfg.representation_dims
             if (
