@@ -11,33 +11,37 @@ reporting relative to per-shift reference policies remain planned extensions.
 
 ## Setup
 
-The project requires Python 3.12 or newer and uses
-[`uv`](https://docs.astral.sh/uv/):
+The project requires Python 3.12 or newer and uses [`uv`](https://docs.astral.sh/uv/) for dependency management. To setup the virtual env, run
 
 ```bash
 uv sync
 ```
 
-Trained policies are cached under `models/` by default. Set `MODELS_DIR` in a
-local `.env` file to use another location.
+Trained policies are cached under `models/` by default. Set `MODELS_DIR` in a local `.env` file to use another location.
 
 
 ## Run Experiments
 
-Run one seeded CartPole robustness experiment:
+### Basic Evaluation
+
+To run a single seeded CartPole robustness experiment:
 
 ```bash
-uv run python scripts/cli.py \
+uv run scripts/cli.py \
   --env-name CartPole-v1 \
-  --debug-seed 0 \
-  --results-out CartPole-v1/smoke
+  --results-out CartPole-v1/RUN_NAME
 ```
 
-Omit `--debug-seed` for the configured multi-seed experiment. Add `--retrain`
-to ignore a cached policy. Results and plots are written beneath `results/`,
-which is intentionally gitignored.
+If there are no cached models saved, this will train a new DQN for each of 25 seeds and then evaluate it. If there are saved models, then the script will load them first. To see a list of args to the CLI script, run
 
-Compare 500k- and 5M-step MinAtar policies over three seeds:
+
+```bash
+uv run scripts/cli.py --help
+```
+
+
+### MinAtar
+To compare 500k- and 5M-step MinAtar policies over three seeds:
 
 ```bash
 uv run python scripts/minatar_training_benchmark.py
@@ -53,29 +57,10 @@ uv run python scripts/cli.py \
   --debug-seed 0
 ```
 
-The tuned MinAtar configuration uses the policy's three action values as an
-action-relevant representation instead of selecting a PCA variance cutoff:
 
-```bash
-uv run python scripts/cli.py \
-  --env-name MinAtar/Breakout-v1 \
-  --n-train-steps 500000 \
-  --num-experiments 10 \
-  --num-eval-episodes 25 \
-  --representation-method q_values \
-  --grid-bins 3 \
-  --alpha 0.50 \
-  --min-calib 100 \
-  --n-representation-steps 10000 \
-  --n-calib-steps 50000 \
-  --obs-quantile 0.1
-```
+### Per-shift reference policies
 
-## Per-shift reference policies
-
-The reference-policy runner trains fresh policies directly in every shifted
-environment. It saves raw episode returns and an across-training-seed mean for
-each shift:
+The reference-policy runner trains fresh policies directly for each parameter shifts. It runs a few seeds and saves raw episode returns, so you can compute the calibrated returns as a ratio to an agent trained directly in that environment.
 
 ```bash
 uv run python scripts/optimal_policies.py \
@@ -83,8 +68,6 @@ uv run python scripts/optimal_policies.py \
   --seeds 0 1 2 3 4
 ```
 
-These are empirical reference returns, not guarantees of global optimality.
-They are intended to support a normalized-regret robustness metric.
 
 ## Repository layout
 
@@ -92,14 +75,13 @@ They are intended to support a normalized-regret robustness metric.
   sparse conformal corrections.
 - `src/crl/discretise/grid.py`: sparse mixed-radix state-action grid.
 - `src/crl/experiment.py`: calibration and paired shift evaluation pipeline.
-- `src/crl/agents/`: DQN, Double DQN, and CQL-DQN training/loading.
-- `src/crl/configs/`: environment-specific DQN hyperparameters.
+- `src/crl/agents/`: DQN, DDQN, and CQL-DQN training/loading.
+- `src/crl/configs/`: environment-specific DQN hyperparameters from SB Zoo.
 - `scripts/`: runnable experiment entry points.
-- `tests/crl/`: deterministic unit and end-to-end tests.
+- `tests/crl/`: tests.
 
 Generated models, experiment results, profiles, and local environment files are
 excluded from version control.
-
 
 ## Tests
 
