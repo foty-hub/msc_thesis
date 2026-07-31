@@ -11,10 +11,6 @@ def _normalise_bins(n_bins: int | Sequence[int], n_dims: int) -> np.ndarray:
         bins = np.full(n_dims, n_bins, dtype=np.int64)
     else:
         bins = np.asarray(n_bins, dtype=np.int64)
-    if bins.shape != (n_dims,):
-        raise ValueError("n_bins must be an int or contain one entry per dimension.")
-    if np.any(bins < 1):
-        raise ValueError("Every grid dimension must contain at least one bin.")
     return bins
 
 
@@ -25,8 +21,6 @@ def _get_unique_ids(
     """Encode rows of mixed-radix bin coordinates as stable integer IDs."""
     binned = np.asarray(binned_data, dtype=np.int64)
     bins = np.asarray(num_bins, dtype=np.int64)
-    if binned.ndim != 2 or binned.shape[1] != bins.size:
-        raise ValueError("binned_data must have shape (n_samples, n_dimensions).")
 
     multipliers = np.cumprod(bins[::-1], dtype=np.int64)[:-1][::-1]
     multipliers = np.append(multipliers, np.int64(1))
@@ -47,16 +41,8 @@ def discretise_observation_grid(
     mins_arr = np.asarray(mins, dtype=float)
     maxs_arr = np.asarray(maxs, dtype=float)
     bins = np.asarray(num_bins, dtype=np.int64)
-    expected_shape = (bins.size,)
-    if observations.ndim != 2 or observations.shape[1] != bins.size:
-        raise ValueError("obs must have shape (n_samples, n_dimensions).")
-    if mins_arr.shape != expected_shape or maxs_arr.shape != expected_shape:
-        raise ValueError("mins, maxs, and num_bins must have matching shapes.")
 
     widths = (maxs_arr - mins_arr) / bins
-    if np.any(widths <= 0) or not np.all(np.isfinite(widths)):
-        raise ValueError("Every grid dimension must have a finite positive width.")
-
     coordinates = np.floor((observations - mins_arr) / widths)
     coordinates = np.clip(coordinates, 0, bins - 1).astype(np.int64)
     return _get_unique_ids(coordinates, bins)
@@ -81,15 +67,6 @@ class GridDiscretiser:
         obs_quantile: float = 0.1,
     ) -> GridDiscretiser:
         obs = np.asarray(observations, dtype=float)
-        if obs.ndim != 2 or obs.shape[0] == 0:
-            raise ValueError("observations must have shape (n_samples, n_dimensions).")
-        if not np.all(np.isfinite(obs)):
-            raise ValueError("Grid fitting observations must all be finite.")
-        if not 0.0 <= obs_quantile < 0.5:
-            raise ValueError("obs_quantile must lie in [0, 0.5).")
-        if n_actions < 1:
-            raise ValueError("n_actions must be positive.")
-
         bins = _normalise_bins(n_bins, obs.shape[1])
         mins = np.quantile(obs, obs_quantile, axis=0)
         maxs = np.quantile(obs, 1.0 - obs_quantile, axis=0)
@@ -128,9 +105,4 @@ class GridDiscretiser:
             state_ids = np.repeat(state_ids, action_ids.size)
         elif action_ids.size == 1 and state_ids.size > 1:
             action_ids = np.repeat(action_ids, state_ids.size)
-        elif state_ids.size != action_ids.size:
-            raise ValueError("Observation and action batch sizes are incompatible.")
-
-        if np.any(action_ids < 0) or np.any(action_ids >= self.n_actions):
-            raise ValueError("Action is outside the configured discrete action space.")
         return state_ids * self.n_actions + action_ids

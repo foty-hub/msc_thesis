@@ -27,20 +27,6 @@ class GridTuningCandidate:
     n_calib_steps: int
     obs_quantile: float
 
-    def __post_init__(self) -> None:
-        if not 0.0 < self.alpha < 1.0:
-            raise ValueError("alpha must lie strictly between zero and one.")
-        if self.grid_bins < 1:
-            raise ValueError("grid_bins must be positive.")
-        if self.min_calib < 1:
-            raise ValueError("min_calib must be positive.")
-        if self.n_calib_steps < 1:
-            raise ValueError("n_calib_steps must be positive.")
-        if self.min_calib > self.n_calib_steps:
-            raise ValueError("min_calib cannot exceed n_calib_steps.")
-        if not 0.0 <= self.obs_quantile < 0.5:
-            raise ValueError("obs_quantile must lie in [0, 0.5).")
-
 
 def partition_seed_scores(
     seed_scores: Mapping[int, float],
@@ -48,13 +34,6 @@ def partition_seed_scores(
     threshold: float,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """Split seeds by whether their mean nominal return reaches a threshold."""
-    if not np.isfinite(threshold):
-        raise ValueError("threshold must be finite.")
-    if not seed_scores:
-        raise ValueError("At least one seed score is required.")
-    if not all(np.isfinite(score) for score in seed_scores.values()):
-        raise ValueError("All seed scores must be finite.")
-
     eligible = tuple(
         seed for seed, score in seed_scores.items() if score >= threshold
     )
@@ -72,12 +51,6 @@ def choose_shift_indices(
 ) -> tuple[int, ...]:
     """Choose spread-out shift indices while retaining endpoints and nominal."""
     shift_values = np.asarray(values, dtype=float)
-    if shift_values.ndim != 1 or shift_values.size == 0:
-        raise ValueError("values must be a non-empty one-dimensional sequence.")
-    if count < 3 and shift_values.size >= 3:
-        raise ValueError("count must be at least three to retain both endpoints.")
-    if count < 1:
-        raise ValueError("count must be positive.")
     if count >= shift_values.size:
         return tuple(range(shift_values.size))
 
@@ -112,28 +85,15 @@ def objective_score(
 ) -> float:
     """Aggregate paired seed deltas with optional safety penalties."""
     deltas = np.asarray(seed_deltas, dtype=float)
-    if deltas.ndim != 1 or deltas.size == 0 or not np.all(np.isfinite(deltas)):
-        raise ValueError("seed_deltas must be a non-empty finite sequence.")
-    if nominal_loss_penalty < 0.0 or worst_seed_loss_penalty < 0.0:
-        raise ValueError("Penalty weights cannot be negative.")
-    if nominal_loss_tolerance < 0.0 or worst_seed_loss_tolerance < 0.0:
-        raise ValueError("Loss tolerances cannot be negative.")
-
     if mode == "mean":
         score = float(np.mean(deltas))
     elif mode == "median":
         score = float(np.median(deltas))
-    elif mode == "mean_median":
-        score = float(0.5 * np.mean(deltas) + 0.5 * np.median(deltas))
     else:
-        raise ValueError(f"Unknown objective mode: {mode}")
+        score = float(0.5 * np.mean(deltas) + 0.5 * np.median(deltas))
 
     if nominal_loss_penalty:
         nominal = np.asarray(nominal_deltas, dtype=float)
-        if nominal.shape != deltas.shape or not np.all(np.isfinite(nominal)):
-            raise ValueError(
-                "nominal_deltas must match seed_deltas when using its penalty."
-            )
         excess_nominal_loss = max(
             0.0,
             -float(np.mean(nominal)) - nominal_loss_tolerance,
@@ -161,35 +121,24 @@ def calibrate_candidate(
 ) -> GridCalibration:
     """Fit one sparse-grid candidate from a chronological transition prefix."""
     prefix = transitions[: candidate.n_calib_steps]
-    if len(prefix) < candidate.n_calib_steps:
-        raise ValueError("The cached transition buffer is shorter than the candidate.")
-
     discretiser = fit_grid_from_buffer(
         prefix,
         n_bins=candidate.grid_bins,
         n_actions=n_actions,
         obs_quantile=candidate.obs_quantile,
     )
-    if scoring_method == "td":
-        calibration_sets = fill_calib_sets_td(
-            model,
-            prefix,
-            discretiser,
-            maxlen=max_calib_per_cell,
-            score=signed_score,
-            batch_size=inference_batch_size,
-        )
-    elif scoring_method == "monte_carlo":
-        calibration_sets = fill_calib_sets_mc(
-            model,
-            prefix,
-            discretiser,
-            maxlen=max_calib_per_cell,
-            score=signed_score,
-            batch_size=inference_batch_size,
-        )
-    else:
-        raise ValueError(f"Unknown scoring method: {scoring_method}")
+    fill_calibration_sets = {
+        "td": fill_calib_sets_td,
+        "monte_carlo": fill_calib_sets_mc,
+    }[scoring_method]
+    calibration_sets = fill_calibration_sets(
+        model,
+        prefix,
+        discretiser,
+        maxlen=max_calib_per_cell,
+        score=signed_score,
+        batch_size=inference_batch_size,
+    )
 
     corrections = compute_corrections(
         calibration_sets,

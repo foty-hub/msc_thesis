@@ -19,8 +19,8 @@ from crl.calib import (
     signed_score,
 )
 from crl.discretise import GridDiscretiser
-from crl.env import instantiate_eval_env
-from crl.types import ClassicControl, ScoringMethod
+from crl.env import MINATAR_BREAKOUT, instantiate_eval_env
+from crl.types import ClassicControl, RepresentationMethod, ScoringMethod
 
 
 @dataclass(frozen=True)
@@ -61,6 +61,12 @@ SHIFT_SPECS: dict[ClassicControl, ShiftSpec] = {
         nominal_value=-10.0,
         grid_bins=4,
     ),
+    MINATAR_BREAKOUT: ShiftSpec(
+        parameter="sticky_action_prob",
+        values=tuple(float(value) for value in np.arange(0.0, 0.51, 0.05)),
+        nominal_value=0.1,
+        grid_bins=4,
+    ),
 }
 
 
@@ -74,6 +80,44 @@ class GridCalibrationConfig:
     scoring_method: ScoringMethod = "td"
     score_fn: Callable[[np.ndarray, np.ndarray], np.ndarray] = signed_score
     inference_batch_size: int = 4096
+    representation_dim: int | None = None
+    n_representation_steps: int = 10_000
+    representation_method: RepresentationMethod = "pca"
+
+
+@dataclass(frozen=True)
+class PCARepresentation:
+    mean: np.ndarray
+    components: np.ndarray
+
+    def transform(self, features: np.ndarray) -> np.ndarray:
+        return (np.asarray(features) - self.mean) @ self.components.T
+
+    @property
+    def n_dimensions(self) -> int:
+        return int(self.components.shape[0])
+
+
+@dataclass(frozen=True)
+class InputPCARepresentation(PCARepresentation):
+    """PCA fitted to flattened observations before policy feature extraction."""
+
+
+@dataclass(frozen=True)
+class QValueRepresentation:
+    """Use the policy's action values as an action-relevant state summary."""
+
+    model: DQN
+
+    def transform(self, features: np.ndarray) -> np.ndarray:
+        feature_tensor = torch.as_tensor(features, device=self.model.device)
+        with torch.inference_mode():
+            q_values = self.model.q_net.q_net(feature_tensor)
+        return q_values.detach().cpu().numpy()
+
+    @property
+    def n_dimensions(self) -> int:
+        return int(self.model.action_space.n)
 
 
 @dataclass(frozen=True)
@@ -83,6 +127,71 @@ class GridCalibration:
     n_visited_cells: int
     n_calibrated_cells: int
     fallback: float
+    representation: (
+        PCARepresentation | InputPCARepresentation | QValueRepresentation | None
+    ) = None
+
+
+def extract_policy_features(
+    model: DQN,
+    observations: np.ndarray,
+    *,
+    batch_size: int = 4096,
+) -> np.ndarray:
+    batches = []
+    with torch.inference_mode():
+        for start in range(0, len(observations), batch_size):
+            observation_tensor = model.policy.obs_to_tensor(
+                observations[start : start + batch_size]
+            )[0]
+            features = model.q_net.extract_features(
+                observation_tensor,
+                model.q_net.features_extractor,
+            )
+            batches.append(features.detach().cpu().numpy())
+    return np.concatenate(batches)
+
+
+def fit_pca_representation(
+    features: np.ndarray,
+    n_components: int,
+) -> PCARepresentation:
+    mean = features.mean(axis=0)
+    _, _, components = np.linalg.svd(features - mean, full_matrices=False)
+    components = components[:n_components]
+    largest = np.abs(components).argmax(axis=1)
+    signs = np.sign(components[np.arange(n_components), largest])
+    components *= signs[:, None]
+    return PCARepresentation(mean=mean, components=components)
+
+
+def fit_input_pca_representation(
+    features: np.ndarray,
+    n_components: int,
+) -> InputPCARepresentation:
+    """Fit exact PCA without materialising the large left-singular matrix."""
+    features = np.asarray(features, dtype=np.float64)
+    mean = features.mean(axis=0)
+    centered = features - mean
+    covariance = centered.T @ centered
+    _eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+    components = eigenvectors[:, -n_components:][:, ::-1].T.copy()
+    largest = np.abs(components).argmax(axis=1)
+    signs = np.sign(components[np.arange(n_components), largest])
+    components *= signs[:, None]
+    return InputPCARepresentation(mean=mean, components=components)
+
+
+def buffer_observations(buffer: ReplayBuffer) -> np.ndarray:
+    return np.concatenate(
+        [np.asarray(transition.state) for transition in buffer],
+        axis=0,
+    )
+
+
+def flatten_observations(observations: np.ndarray) -> np.ndarray:
+    observations = np.asarray(observations)
+    return observations.reshape(len(observations), -1)
 
 
 def fit_grid_from_buffer(
@@ -91,11 +200,10 @@ def fit_grid_from_buffer(
     n_bins: int,
     n_actions: int,
     obs_quantile: float,
+    observations: np.ndarray | None = None,
 ) -> GridDiscretiser:
-    observations = np.concatenate(
-        [np.asarray(transition.state) for transition in buffer],
-        axis=0,
-    )
+    if observations is None:
+        observations = buffer_observations(buffer)
     return GridDiscretiser.fit(
         observations,
         n_bins=n_bins,
@@ -111,40 +219,93 @@ def calibrate_grid_policy(
     n_bins: int,
     config: GridCalibrationConfig,
 ) -> GridCalibration:
-    """Fit a nominal grid and conformal corrections from one rollout."""
-    # First observe the agent to collect transitions in the nominal (un-shifted) env
+    """Fit a nominal grid and conformal corrections."""
+    representation = None
+    grid_buffer = None
+    if (
+        config.representation_dim is not None
+        or config.representation_method == "q_values"
+    ):
+        grid_buffer = collect_transitions(
+            model,
+            env,
+            config.n_representation_steps,
+        )
+        representation_observations = buffer_observations(grid_buffer)
+        if config.representation_method == "input_pca":
+            input_features = flatten_observations(
+                representation_observations
+            )
+            representation = fit_input_pca_representation(
+                input_features,
+                config.representation_dim,
+            )
+            grid_observations = representation.transform(input_features)
+        else:
+            latent_features = extract_policy_features(
+                model,
+                representation_observations,
+                batch_size=config.inference_batch_size,
+            )
+        if config.representation_method == "pca":
+            representation = fit_pca_representation(
+                latent_features,
+                config.representation_dim,
+            )
+            grid_observations = representation.transform(latent_features)
+        elif config.representation_method == "q_values":
+            representation = QValueRepresentation(model)
+            grid_observations = representation.transform(latent_features)
+
     calibration_buffer = collect_transitions(model, env, config.n_calib_steps)
+    if grid_buffer is None:
+        grid_buffer = calibration_buffer
+        grid_observations = buffer_observations(grid_buffer)
 
     # Defines the grid cell boundaries using a sparse radix encoding (so we don't have
     # to materialise the whole grid - useful for higher dimensional state spaces).
     discretiser = fit_grid_from_buffer(
-        calibration_buffer,
+        grid_buffer,
         n_bins=n_bins,
         n_actions=int(env.action_space.n),
         obs_quantile=config.obs_quantile,
+        observations=grid_observations,
     )
 
-    # Given the grid, compute the calibration scores
-    if config.scoring_method == "td":
-        calibration_sets = fill_calib_sets_td(
-            model,
-            calibration_buffer,
-            discretiser,
-            maxlen=config.max_calib_per_cell,
-            score=config.score_fn,
-            batch_size=config.inference_batch_size,
-        )
-    elif config.scoring_method == "monte_carlo":
-        calibration_sets = fill_calib_sets_mc(
-            model,
-            calibration_buffer,
-            discretiser,
-            maxlen=config.max_calib_per_cell,
-            score=config.score_fn,
-            batch_size=config.inference_batch_size,
-        )
+    if representation is None:
+        calibration_discretiser = discretiser
+    elif isinstance(representation, InputPCARepresentation):
+
+        def calibration_discretiser(observations, actions):
+            input_features = flatten_observations(observations)
+            return discretiser(
+                representation.transform(input_features),
+                actions,
+            )
+
     else:
-        raise ValueError(f"Unknown scoring method: {config.scoring_method}")
+
+        def calibration_discretiser(observations, actions):
+            features = extract_policy_features(
+                model,
+                observations,
+                batch_size=config.inference_batch_size,
+            )
+            return discretiser(representation.transform(features), actions)
+
+    # Given the grid, compute the calibration scores
+    fill_calibration_sets = {
+        "td": fill_calib_sets_td,
+        "monte_carlo": fill_calib_sets_mc,
+    }[config.scoring_method]
+    calibration_sets = fill_calibration_sets(
+        model,
+        calibration_buffer,
+        calibration_discretiser,
+        maxlen=config.max_calib_per_cell,
+        score=config.score_fn,
+        batch_size=config.inference_batch_size,
+    )
 
     # Compute corrections using the scores
     corrections = compute_corrections(
@@ -158,6 +319,7 @@ def calibrate_grid_policy(
         n_visited_cells=len(calibration_sets),
         n_calibrated_cells=len(corrections) - 1,
         fallback=float(corrections["fallback"]),
+        representation=representation,
     )
 
 
@@ -170,16 +332,34 @@ def select_action(
     """Select the greedy raw or conformal-corrected action."""
     with torch.inference_mode():
         observation_tensor = model.policy.obs_to_tensor(observation)[0]
-        raw_q_values = (
-            model.q_net(observation_tensor)[0].detach().cpu().numpy().astype(float)
+        representation = (
+            None if calibration is None else calibration.representation
         )
+        if isinstance(representation, InputPCARepresentation):
+            raw_q_tensor = model.q_net(observation_tensor)
+            grid_observation = representation.transform(
+                flatten_observations(observation)
+            )
+        elif representation is not None:
+            features = model.q_net.extract_features(
+                observation_tensor,
+                model.q_net.features_extractor,
+            )
+            raw_q_tensor = model.q_net.q_net(features)
+            grid_observation = representation.transform(
+                features.detach().cpu().numpy()
+            )
+        else:
+            raw_q_tensor = model.q_net(observation_tensor)
+            grid_observation = observation
+        raw_q_values = raw_q_tensor[0].detach().cpu().numpy().astype(float)
 
     if calibration is None:
         corrections = np.zeros_like(raw_q_values)
     else:
         actions = np.arange(raw_q_values.size, dtype=np.int64)
         corrections = corrections_for_actions(
-            observation,
+            grid_observation,
             actions,
             calibration.corrections,
             calibration.discretiser,
@@ -220,9 +400,10 @@ def evaluate_policy(
             episode_return = 0.0
             episode_steps = 0
         elif episode_steps >= max_steps_per_episode:
-            raise RuntimeError(
-                "Evaluation episode exceeded max_steps_per_episode without ending."
-            )
+            returns.append(episode_return)
+            observation = env.reset()
+            episode_return = 0.0
+            episode_steps = 0
 
     return returns
 

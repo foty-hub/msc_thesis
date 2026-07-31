@@ -12,12 +12,15 @@ dependencies = [
     "box2d>=2.3.10",
     "gymnasium>=1.1.1",
     "matplotlib>=3.10.3",
+    "minatar>=1.0.15",
     "numpy>=2.1",
     "pygame>=2.6.1",
     "python-dotenv>=1.0.1",
     "pyyaml>=6.0.2",
+    "rich>=13.9.4",
     "stable-baselines3>=2.7.0",
     "torch>=2.7.0",
+    "tqdm>=4.67.1",
 ]
 
 [dependency-groups]
@@ -45,3 +48,4 @@ packages = ["src/crl"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]

@@ -49,9 +49,6 @@ def make_shifted_env(
     value: float,
 ) -> gym.Env:
     env = gym.make(env_name, render_mode="rgb_array")
-    if not hasattr(env.unwrapped, parameter):
-        env.close()
-        raise ValueError(f"{env_name} has no shift parameter {parameter!r}.")
     setattr(env.unwrapped, parameter, value)
     env.reset(seed=seed)
     env.action_space.seed(seed)
@@ -74,13 +71,11 @@ def instantiate_agent(
     cql_alpha: float,
 ) -> DQN:
     kwargs = load_dqn_args(env_name)
-    if agent_type == "vanilla":
-        return DQN(env=env, seed=seed, **kwargs)
     if agent_type == "ddqn":
         return DDQN(env=env, seed=seed, **kwargs)
     if agent_type == "cql":
         return CQLDQN(env=env, seed=seed, cql_alpha=cql_alpha, **kwargs)
-    raise ValueError(f"Unknown agent type: {agent_type}")
+    return DQN(env=env, seed=seed, **kwargs)
 
 
 def train_and_evaluate_one(
@@ -135,8 +130,6 @@ def summarise_shift(
     value: float,
     seed_results: list[dict],
 ) -> dict:
-    if not seed_results:
-        raise ValueError("At least one trained policy is required.")
     ordered = sorted(seed_results, key=lambda result: result["seed"])
     seed_means = np.asarray(
         [result["mean_return"] for result in ordered],
@@ -187,11 +180,6 @@ def save_results(
 
 
 def run_reference_training(config: ReferencePolicyConfig) -> list[dict]:
-    if not config.seeds:
-        raise ValueError("At least one seed is required.")
-    if config.max_workers < 1:
-        raise ValueError("max_workers must be positive.")
-
     shift = SHIFT_SPECS[config.env_name]
     output_dir = (
         project_root()
@@ -231,7 +219,15 @@ def parse_args() -> ReferencePolicyConfig:
     parser = argparse.ArgumentParser(
         description="Train reference policies in every shifted environment."
     )
-    parser.add_argument("env", choices=sorted(SHIFT_SPECS))
+    parser.add_argument(
+        "env",
+        choices=[
+            "Acrobot-v1",
+            "CartPole-v1",
+            "LunarLander-v3",
+            "MountainCar-v0",
+        ],
+    )
     parser.add_argument(
         "--agent",
         choices=["vanilla", "ddqn", "cql"],

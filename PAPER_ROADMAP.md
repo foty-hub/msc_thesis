@@ -76,6 +76,10 @@ seeds.
 
 ### 3. Add a larger state-space task such as MinAtar
 
+The first implementation now covers `MinAtar/Breakout-v1`, using a small CNN
+policy and a PCA projection of its latent features for grid calibration.
+Sticky-action probability is the initial dynamics shift.
+
 Do not apply the current full Cartesian grid directly to MinAtar pixels. The
 number of cells grows exponentially, and the current mixed-radix `int64` cell ID
 can overflow in high dimensions even though storage is sparse.

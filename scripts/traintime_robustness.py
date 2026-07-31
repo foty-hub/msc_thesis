@@ -14,13 +14,19 @@ import yaml
 
 from crl.agents import learn_cqldqn_policy, learn_ddqn_policy, learn_dqn_policy
 from crl.calib import signed_score
+from crl.env import MINATAR_BREAKOUT
 from crl.experiment import (
     SHIFT_SPECS,
     GridCalibrationConfig,
     calibrate_grid_policy,
     evaluate_shift,
 )
-from crl.types import AgentTypes, ClassicControl, ScoringMethod
+from crl.types import (
+    AgentTypes,
+    ClassicControl,
+    RepresentationMethod,
+    ScoringMethod,
+)
 from crl.utils.graphing import despine
 from crl.utils.paths import project_root
 
@@ -32,7 +38,10 @@ class RobustnessConfig:
     max_calib_per_cell: int = 500
     num_experiments: int = 25
     num_eval_episodes: int = 25
-    n_calib_steps: int = 10_000
+    n_calib_steps: int | None = None
+    n_representation_steps: int = 10_000
+    representation_dims: int | None = None
+    representation_method: RepresentationMethod = "pca"
     n_train_steps: int = 50_000
     obs_quantile: float = 0.1
     grid_bins: int | None = None
@@ -42,6 +51,16 @@ class RobustnessConfig:
     retrain: bool = False
     max_workers: int = 4
     debug_seed: int | None = None
+    eval_seed_offset: int = 100_000
+
+
+def effective_calibration_steps(
+    env_name: ClassicControl,
+    cfg: RobustnessConfig,
+) -> int:
+    if cfg.n_calib_steps is not None:
+        return cfg.n_calib_steps
+    return 50_000 if env_name == MINATAR_BREAKOUT else 10_000
 
 
 def train_agent(env_name: ClassicControl, seed: int, cfg: RobustnessConfig):
@@ -60,14 +79,12 @@ def train_agent(env_name: ClassicControl, seed: int, cfg: RobustnessConfig):
             total_timesteps=cfg.n_train_steps,
             train_from_scratch=cfg.retrain,
         )
-    if cfg.agent_type == "vanilla":
-        return learn_dqn_policy(
-            env_name=env_name,
-            seed=seed,
-            total_timesteps=cfg.n_train_steps,
-            train_from_scratch=cfg.retrain,
-        )
-    raise ValueError(f"Unknown agent type: {cfg.agent_type}")
+    return learn_dqn_policy(
+        env_name=env_name,
+        seed=seed,
+        total_timesteps=cfg.n_train_steps,
+        train_from_scratch=cfg.retrain,
+    )
 
 
 def run_single_seed_experiment(
@@ -81,6 +98,13 @@ def run_single_seed_experiment(
     train_seconds = time.perf_counter() - train_start
     shift_spec = SHIFT_SPECS[env_name]
     grid_bins = shift_spec.grid_bins if cfg.grid_bins is None else cfg.grid_bins
+    representation_dims = cfg.representation_dims
+    if (
+        env_name == MINATAR_BREAKOUT
+        and representation_dims is None
+        and cfg.representation_method in ("pca", "input_pca")
+    ):
+        representation_dims = 4
 
     # Observe the agent and compute all the calibrations
     calibration_start = time.perf_counter()
@@ -89,13 +113,16 @@ def run_single_seed_experiment(
         nominal_env,
         n_bins=grid_bins,
         config=GridCalibrationConfig(
-            n_calib_steps=cfg.n_calib_steps,
+            n_calib_steps=effective_calibration_steps(env_name, cfg),
             alpha=cfg.alpha,
             min_calib=cfg.min_calib,
             max_calib_per_cell=cfg.max_calib_per_cell,
             obs_quantile=cfg.obs_quantile,
             scoring_method=cfg.scoring_method,
             score_fn=signed_score,
+            representation_dim=representation_dims,
+            n_representation_steps=cfg.n_representation_steps,
+            representation_method=cfg.representation_method,
         ),
     )
     calibration_seconds = time.perf_counter() - calibration_start
@@ -109,7 +136,7 @@ def run_single_seed_experiment(
             parameter=shift_spec.parameter,
             value=value,
             n_episodes=cfg.num_eval_episodes,
-            eval_seed=100_000 + seed,
+            eval_seed=cfg.eval_seed_offset + seed,
             calibration=calibration,
         )
         for value in shift_spec.values
@@ -123,6 +150,12 @@ def run_single_seed_experiment(
             "n_calibrated_cells": calibration.n_calibrated_cells,
             "fallback": calibration.fallback,
             "n_state_action_cells": calibration.discretiser.n_state_action_cells,
+            "representation_dims": (
+                None
+                if calibration.representation is None
+                else calibration.representation.n_dimensions
+            ),
+            "representation_method": cfg.representation_method,
         },
         "timing_seconds": {
             "train_or_load": train_seconds,
@@ -169,18 +202,10 @@ def plot_robustness(
 
 def main(
     env_name: ClassicControl,
-    config: RobustnessConfig | dict | None = None,
+    config: RobustnessConfig | None = None,
     results_out: str | None = None,
 ) -> list[dict]:
-    cfg = (
-        RobustnessConfig()
-        if config is None
-        else RobustnessConfig(**config)
-        if isinstance(config, dict)
-        else config
-    )
-    if env_name not in SHIFT_SPECS:
-        raise ValueError(f"No shift specification configured for {env_name}.")
+    cfg = config or RobustnessConfig()
 
     out_dir = project_root() / "results" / (results_out or env_name)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -192,6 +217,26 @@ def main(
             if cfg.grid_bins is None
             else cfg.grid_bins
         ),
+        "effective_n_calib_steps": effective_calibration_steps(env_name, cfg),
+        "effective_representation_dims": (
+            3
+            if (
+                env_name == MINATAR_BREAKOUT
+                and cfg.representation_method == "q_values"
+            )
+            else cfg.representation_dims
+            if (
+                cfg.representation_dims is not None
+                and cfg.representation_method in ("pca", "input_pca")
+            )
+            else 4
+            if (
+                env_name == MINATAR_BREAKOUT
+                and cfg.representation_method in ("pca", "input_pca")
+            )
+            else None
+        ),
+        "effective_representation_method": cfg.representation_method,
         "shift": asdict(SHIFT_SPECS[env_name]),
         "score_fn": "signed_score",
         "calibration_method": "sparse_grid",

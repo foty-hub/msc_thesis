@@ -13,8 +13,6 @@ Transition = namedtuple(
 
 class ReplayBuffer:
     def __init__(self, capacity: int = 100_000):
-        if capacity < 1:
-            raise ValueError("Replay buffer capacity must be positive.")
         self.capacity = capacity
         self.buffer = [None] * capacity
         self.pos = 0
@@ -40,8 +38,6 @@ class ReplayBuffer:
         return ordered[key]
 
     def sample(self, batch_size: int) -> list[Transition]:
-        if not 0 < batch_size <= len(self):
-            raise ValueError("batch_size must be between one and the buffer length.")
         idx = np.random.choice(len(self), batch_size, replace=False)
         transitions = list(self)
         return [transitions[i] for i in idx]

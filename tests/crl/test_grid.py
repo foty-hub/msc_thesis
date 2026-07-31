@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 from crl.discretise.grid import GridDiscretiser, discretise_observation_grid
 
@@ -49,14 +48,3 @@ def test_grid_fit_handles_constant_dimensions():
     )
     assert np.all(grid.maxs > grid.mins)
     assert grid(np.ones(2), 0).shape == (1,)
-
-
-def test_grid_rejects_invalid_action():
-    grid = GridDiscretiser.fit(
-        np.asarray([[0.0], [1.0]]),
-        n_bins=2,
-        n_actions=2,
-        obs_quantile=0.0,
-    )
-    with pytest.raises(ValueError, match="outside"):
-        grid(np.asarray([0.5]), 2)

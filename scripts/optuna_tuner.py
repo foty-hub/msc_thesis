@@ -106,76 +106,6 @@ class SeedContext(SeedModel):
     transitions: tuple
 
 
-def _validate_config(config: OptunaTuningConfig) -> None:
-    if not config.development_seeds:
-        raise ValueError("At least one development seed is required.")
-    if len(set(config.development_seeds)) != len(config.development_seeds):
-        raise ValueError("Development seeds must be unique.")
-    if len(set(config.validation_seeds)) != len(config.validation_seeds):
-        raise ValueError("Validation seeds must be unique.")
-    overlap = set(config.development_seeds) & set(config.validation_seeds)
-    if overlap:
-        raise ValueError(f"Development and validation seeds overlap: {sorted(overlap)}")
-    if (
-        config.eligibility_eval_episodes < 1
-        or config.tuning_eval_episodes < 1
-        or config.validation_eval_episodes < 1
-    ):
-        raise ValueError("Evaluation episode counts must be positive.")
-    if (
-        config.nominal_reward_threshold is not None
-        and not np.isfinite(config.nominal_reward_threshold)
-    ):
-        raise ValueError("nominal_reward_threshold must be finite.")
-    if config.n_train_steps < 1:
-        raise ValueError("n_train_steps must be positive.")
-    if config.num_trials < 1 or config.n_jobs < 1 or config.torch_threads < 1:
-        raise ValueError("Trial, job, and thread counts must be positive.")
-    if not 1 <= config.min_seeds_before_prune <= len(config.development_seeds):
-        raise ValueError("min_seeds_before_prune is outside the seed count.")
-    if config.startup_trials < 0:
-        raise ValueError("startup_trials cannot be negative.")
-    if (
-        not config.grid_bin_choices
-        or min(config.grid_bin_choices) < 1
-        or len(set(config.grid_bin_choices)) != len(config.grid_bin_choices)
-    ):
-        raise ValueError("Grid-bin choices must be positive.")
-    if (
-        not config.calibration_step_choices
-        or min(config.calibration_step_choices) < 1
-        or len(set(config.calibration_step_choices))
-        != len(config.calibration_step_choices)
-    ):
-        raise ValueError("Calibration-step choices must be positive.")
-    if (
-        not config.min_calib_choices
-        or min(config.min_calib_choices) < 1
-        or len(set(config.min_calib_choices)) != len(config.min_calib_choices)
-    ):
-        raise ValueError("min_calib choices must be positive.")
-    if config.max_calib_per_cell < 1 or config.inference_batch_size < 1:
-        raise ValueError("Calibration capacity and batch size must be positive.")
-    if max(config.min_calib_choices) > config.max_calib_per_cell:
-        raise ValueError("min_calib cannot exceed max_calib_per_cell.")
-    if max(config.min_calib_choices) > min(config.calibration_step_choices):
-        raise ValueError("A min_calib choice exceeds a calibration-step choice.")
-    if not 0.0 < config.alpha_min <= config.alpha_max < 1.0:
-        raise ValueError("Alpha bounds must lie strictly between zero and one.")
-    if not 0.0 <= config.obs_quantile_min <= config.obs_quantile_max < 0.5:
-        raise ValueError("Observation-quantile bounds must lie in [0, 0.5).")
-    if (
-        config.nominal_loss_penalty < 0.0
-        or config.worst_seed_loss_penalty < 0.0
-        or config.nominal_loss_tolerance < 0.0
-        or config.worst_seed_loss_tolerance < 0.0
-    ):
-        raise ValueError("Objective penalties and tolerances cannot be negative.")
-    shift_count = len(SHIFT_SPECS[config.env_name].values)
-    if not 1 <= config.num_tuning_shifts <= shift_count:
-        raise ValueError("num_tuning_shifts is outside the configured shift range.")
-
-
 def _atomic_pickle(path: Path, payload: Any) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     with temporary.open("wb") as handle:
@@ -903,7 +833,6 @@ def _run_validation(
 
 
 def run_tuning(config: OptunaTuningConfig) -> optuna.Study:
-    _validate_config(config)
     torch.set_num_threads(config.torch_threads)
     if config.scoring_method == "monte_carlo":
         print(
@@ -1067,7 +996,7 @@ def parse_args() -> OptunaTuningConfig:
     )
     parser.add_argument(
         "--env-name",
-        choices=sorted(SHIFT_SPECS),
+        choices=sorted(GRID_CHOICES),
         default="LunarLander-v3",
     )
     parser.add_argument(
@@ -1211,7 +1140,6 @@ def parse_args() -> OptunaTuningConfig:
         eval_seed_offset=args.eval_seed_offset,
         refresh_cache=args.refresh_cache,
     )
-    _validate_config(config)
     if args.print_config_only:
         print(json.dumps(asdict(config), indent=2))
         raise SystemExit(0)

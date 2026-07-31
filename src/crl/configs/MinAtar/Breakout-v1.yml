@@ -1,0 +1,14 @@
+policy: "CnnPolicy"
+learning_rate: 0.00025
+batch_size: 32
+buffer_size: 100000
+learning_starts: 5000
+gamma: 0.99
+target_update_interval: 1000
+train_freq: 1
+gradient_steps: 1
+exploration_initial_eps: 1.0
+exploration_final_eps: 0.1
+policy_kwargs:
+  net_arch: []
+  normalize_images: false

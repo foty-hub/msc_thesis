@@ -12,8 +12,10 @@ from crl.agents._common import (
     load_cached_agent,
     load_dqn_args,
     make_training_env,
+    model_basename,
     seeded_vec_env,
 )
+from crl.env import MINATAR_BREAKOUT
 from crl.types import ClassicControl
 
 
@@ -90,12 +92,13 @@ def instantiate_cql_dqn(
     env_name: ClassicControl,
     seed: int = 0,
     cql_alpha: float = 0.0,
+    total_timesteps: int | None = None,
 ) -> CQLDQN:
     return CQLDQN(
         env=make_training_env(env_name),
         seed=seed,
         cql_alpha=cql_alpha,
-        **load_dqn_args(env_name),
+        **load_dqn_args(env_name, total_timesteps),
     )
 
 
@@ -107,10 +110,11 @@ def learn_cqldqn_policy(
     model_dir: str | Path | None = None,
     train_from_scratch: bool = False,
 ) -> tuple[CQLDQN, VecEnv]:
+    basename = model_basename(env_name, seed, total_timesteps)
     model_path = cached_model_path(
         env_name,
         "cqldqn",
-        f"model_{seed}_alpha_{_alpha_to_filename(cql_alpha)}",
+        f"{basename}_alpha_{_alpha_to_filename(cql_alpha)}",
         model_dir,
     )
     if not train_from_scratch and model_path.with_suffix(".zip").exists():
@@ -118,7 +122,15 @@ def learn_cqldqn_policy(
         model = load_cached_agent(CQLDQN, model_path, env_name)
     else:
         print(f"Learning CQLDQN from scratch: {seed}, alpha: {cql_alpha}")
-        model = instantiate_cql_dqn(env_name, seed, cql_alpha)
-        model.learn(total_timesteps=total_timesteps, progress_bar=False)
+        model = instantiate_cql_dqn(
+            env_name,
+            seed,
+            cql_alpha,
+            total_timesteps,
+        )
+        model.learn(
+            total_timesteps=total_timesteps,
+            progress_bar=env_name == MINATAR_BREAKOUT,
+        )
         model.save(str(model_path))
     return model, seeded_vec_env(model, seed)

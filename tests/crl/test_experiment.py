@@ -9,7 +9,9 @@ from crl.experiment import (
     GridCalibration,
     GridCalibrationConfig,
     calibrate_grid_policy,
+    evaluate_policy,
     evaluate_shift,
+    fit_input_pca_representation,
     select_action,
 )
 
@@ -127,3 +129,42 @@ def test_seeded_vec_env_reproduces_the_next_reset():
     model.get_env().close()
 
     np.testing.assert_array_equal(first, second)
+
+
+def test_evaluation_records_return_at_the_episode_step_limit():
+    model = DQN("MlpPolicy", "CartPole-v1", seed=7)
+    env = model.get_env()
+
+    returns = evaluate_policy(
+        model,
+        env,
+        n_episodes=2,
+        calibration=None,
+        max_steps_per_episode=1,
+    )
+    env.close()
+
+    assert returns == [1.0, 1.0]
+
+
+def test_input_pca_fit_returns_orthonormal_components():
+    observations = np.asarray(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 1.0, 0.0],
+        ]
+    )
+
+    representation = fit_input_pca_representation(
+        observations,
+        n_components=2,
+    )
+
+    assert representation.components.shape == (2, 3)
+    np.testing.assert_allclose(
+        representation.components @ representation.components.T,
+        np.eye(2),
+        atol=1e-12,
+    )

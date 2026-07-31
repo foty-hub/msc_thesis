@@ -42,7 +42,22 @@ def parse_args() -> argparse.Namespace:
         default=defaults.num_eval_episodes,
     )
     parser.add_argument("--n-calib-steps", type=int, default=defaults.n_calib_steps)
-    parser.add_argument("--n-train-steps", type=int, default=defaults.n_train_steps)
+    parser.add_argument(
+        "--n-representation-steps",
+        type=int,
+        default=defaults.n_representation_steps,
+    )
+    parser.add_argument(
+        "--representation-dims",
+        type=int,
+        default=defaults.representation_dims,
+    )
+    parser.add_argument(
+        "--representation-method",
+        choices=["pca", "input_pca", "q_values"],
+        default=defaults.representation_method,
+    )
+    parser.add_argument("--n-train-steps", type=int)
     parser.add_argument(
         "--obs-quantile",
         type=float,
@@ -67,6 +82,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cql-alpha", type=float, default=defaults.cql_alpha)
     parser.add_argument("--max-workers", type=int, default=defaults.max_workers)
     parser.add_argument("--debug-seed", type=int, default=None)
+    parser.add_argument(
+        "--eval-seed-offset",
+        type=int,
+        default=defaults.eval_seed_offset,
+    )
     parser.add_argument("--retrain", action="store_true")
     parser.add_argument("--results-out", default=None)
     parser.add_argument("--print-config-only", action="store_true")
@@ -80,16 +100,46 @@ def build_config_from_args(args: argparse.Namespace) -> RobustnessConfig:
         max_calib_per_cell=args.max_calib_per_cell,
         num_experiments=args.num_experiments,
         num_eval_episodes=args.num_eval_episodes,
-        n_calib_steps=args.n_calib_steps,
-        n_train_steps=args.n_train_steps,
+        n_calib_steps=(
+            args.n_calib_steps
+            if args.n_calib_steps is not None
+            else 50_000
+            if args.env_name == "MinAtar/Breakout-v1"
+            else 10_000
+        ),
+        n_representation_steps=args.n_representation_steps,
+        representation_dims=(
+            None
+            if args.representation_method == "q_values"
+            else args.representation_dims
+            if args.representation_dims is not None
+            else 4
+            if args.env_name == "MinAtar/Breakout-v1"
+            else None
+        ),
+        representation_method=args.representation_method,
+        n_train_steps=(
+            args.n_train_steps
+            if args.n_train_steps is not None
+            else 500_000
+            if args.env_name == "MinAtar/Breakout-v1"
+            else 50_000
+        ),
         obs_quantile=args.obs_quantile,
-        grid_bins=args.grid_bins,
+        grid_bins=(
+            args.grid_bins
+            if args.grid_bins is not None
+            else 4
+            if args.env_name == "MinAtar/Breakout-v1"
+            else None
+        ),
         scoring_method=args.scoring_method,
         agent_type=args.agent_type,
         cql_alpha=args.cql_alpha,
         retrain=args.retrain,
         max_workers=args.max_workers,
         debug_seed=args.debug_seed,
+        eval_seed_offset=args.eval_seed_offset,
     )
 
 

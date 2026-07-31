@@ -5,10 +5,9 @@ learning policies. The current paper-facing implementation uses a nominal-policy
 rollout to fit a state-action grid and estimate conformal corrections, then
 evaluates the corrected greedy policy under controlled dynamics shifts.
 
-The maintained experiment currently covers Gymnasium classic-control
-environments with DQN, Double DQN, and CQL-DQN. MinAtar, actor–critic support,
-and reporting relative to per-shift reference policies are planned extensions,
-not implemented paper results.
+The maintained experiment covers Gymnasium classic-control environments and
+MinAtar Breakout with DQN, Double DQN, and CQL-DQN. Actor–critic support and
+reporting relative to per-shift reference policies remain planned extensions.
 
 ## Setup
 
@@ -37,6 +36,40 @@ uv run python scripts/cli.py \
 Omit `--debug-seed` for the configured multi-seed experiment. Add `--retrain`
 to ignore a cached policy. Results and plots are written beneath `results/`,
 which is intentionally gitignored.
+
+Compare 500k- and 5M-step MinAtar policies over three seeds:
+
+```bash
+uv run python scripts/minatar_training_benchmark.py
+```
+
+Run a single MinAtar robustness seed with a four-dimensional, four-bin latent
+grid and 50k calibration transitions:
+
+```bash
+uv run python scripts/cli.py \
+  --env-name MinAtar/Breakout-v1 \
+  --n-train-steps 500000 \
+  --debug-seed 0
+```
+
+The tuned MinAtar configuration uses the policy's three action values as an
+action-relevant representation instead of selecting a PCA variance cutoff:
+
+```bash
+uv run python scripts/cli.py \
+  --env-name MinAtar/Breakout-v1 \
+  --n-train-steps 500000 \
+  --num-experiments 10 \
+  --num-eval-episodes 25 \
+  --representation-method q_values \
+  --grid-bins 3 \
+  --alpha 0.50 \
+  --min-calib 100 \
+  --n-representation-steps 10000 \
+  --n-calib-steps 50000 \
+  --obs-quantile 0.1
+```
 
 ## Per-shift reference policies
 

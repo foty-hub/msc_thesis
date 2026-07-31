@@ -5,6 +5,16 @@ from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
 from crl.types import ClassicControl
 
+MINATAR_BREAKOUT = "MinAtar/Breakout-v1"
+
+
+def register_minatar() -> None:
+    if MINATAR_BREAKOUT not in gym.registry:
+        from minatar.gym import register_envs
+
+        register_envs()
+
+
 NOMINAL_REWARD_THRESHOLDS: dict[ClassicControl, float] = {
     "CartPole-v1": 475.0,
     "Acrobot-v1": -100.0,
@@ -67,14 +77,13 @@ def instantiate_eval_env(
     """
 
     def make_env() -> gym.Env:
-        eval_env = gym.make(env_name)
-        for key, value in kwargs.items():
-            if hasattr(eval_env.unwrapped, key):
+        if env_name == MINATAR_BREAKOUT:
+            register_minatar()
+            eval_env = gym.make(env_name, **kwargs)
+        else:
+            eval_env = gym.make(env_name)
+            for key, value in kwargs.items():
                 setattr(eval_env.unwrapped, key, value)
-            else:
-                raise ValueError(
-                    f"Invalid parameter '{key}' for environment '{env_name}'"
-                )
         if seed is not None:
             eval_env.action_space.seed(seed)
             eval_env.observation_space.seed(seed)

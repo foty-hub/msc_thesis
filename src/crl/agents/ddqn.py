@@ -12,8 +12,10 @@ from crl.agents._common import (
     load_cached_agent,
     load_dqn_args,
     make_training_env,
+    model_basename,
     seeded_vec_env,
 )
+from crl.env import MINATAR_BREAKOUT
 from crl.types import ClassicControl
 
 
@@ -74,11 +76,12 @@ class DDQN(DQN):
 def instantiate_ddqn(
     env_name: ClassicControl,
     seed: int = 0,
+    total_timesteps: int | None = None,
 ) -> DDQN:
     return DDQN(
         env=make_training_env(env_name),
         seed=seed,
-        **load_dqn_args(env_name),
+        **load_dqn_args(env_name, total_timesteps),
     )
 
 
@@ -92,7 +95,7 @@ def learn_ddqn_policy(
     model_path = cached_model_path(
         env_name,
         "ddqn",
-        f"model_{seed}",
+        model_basename(env_name, seed, total_timesteps),
         model_dir,
     )
     if not train_from_scratch and model_path.with_suffix(".zip").exists():
@@ -100,7 +103,10 @@ def learn_ddqn_policy(
         model = load_cached_agent(DDQN, model_path, env_name)
     else:
         print(f"Learning DDQN from scratch: {seed}")
-        model = instantiate_ddqn(env_name, seed)
-        model.learn(total_timesteps=total_timesteps, progress_bar=False)
+        model = instantiate_ddqn(env_name, seed, total_timesteps)
+        model.learn(
+            total_timesteps=total_timesteps,
+            progress_bar=env_name == MINATAR_BREAKOUT,
+        )
         model.save(str(model_path))
     return model, seeded_vec_env(model, seed)

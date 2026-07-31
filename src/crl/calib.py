@@ -22,11 +22,6 @@ def collect_transitions(
     n_transitions: int,
 ) -> ReplayBuffer:
     """Collect chronological SARSA transitions from one vectorised environment."""
-    if n_transitions < 1:
-        raise ValueError("n_transitions must be positive.")
-    if getattr(env, "num_envs", 1) != 1:
-        raise ValueError("Transition collection currently requires one environment.")
-
     buffer = ReplayBuffer(capacity=n_transitions)
     obs = env.reset()
     action, _ = model.predict(obs, deterministic=True)
@@ -65,10 +60,7 @@ def unsigned_score(y_pred, y_true) -> np.ndarray:
 def _as_transitions(
     buffer: ReplayBuffer | Sequence[Transition],
 ) -> list[Transition]:
-    transitions = list(buffer)
-    if not transitions:
-        raise ValueError("At least one transition is required for calibration.")
-    return transitions
+    return list(buffer)
 
 
 def _transition_arrays(
@@ -112,8 +104,6 @@ def compute_td_scores(
     batch_size: int = 4096,
 ) -> np.ndarray:
     """Compute one-step SARSA scores using batched network inference."""
-    if batch_size < 1:
-        raise ValueError("batch_size must be positive.")
     transitions = _as_transitions(buffer)
     states, actions, rewards, next_states, next_actions, dones = _transition_arrays(
         transitions
@@ -194,8 +184,6 @@ def compute_mc_scores(
     batch_size: int = 4096,
 ) -> np.ndarray:
     """Compute Monte Carlo return scores using batched Q-value inference."""
-    if batch_size < 1:
-        raise ValueError("batch_size must be positive.")
     transitions = _as_transitions(buffer)
     states, actions, _rewards, _next_states, _next_actions, _dones = _transition_arrays(
         transitions
@@ -228,20 +216,15 @@ def _fill_calibration_sets(
     discretise: Callable,
     maxlen: int,
 ) -> CalibrationSets:
-    if maxlen < 1:
-        raise ValueError("maxlen must be positive.")
-
     states, actions, _rewards, _next_states, _next_actions, _dones = _transition_arrays(
         transitions
     )
     cell_ids = np.asarray(discretise(states, actions), dtype=np.int64)
     if cell_ids.ndim == 1:
         cell_ids = cell_ids[:, None]
-    if cell_ids.ndim != 2 or cell_ids.shape[0] != len(transitions):
-        raise ValueError("discretise must return one row of cell IDs per transition.")
 
     calibration_sets: CalibrationSets = {}
-    for row, value in zip(cell_ids, scores, strict=True):
+    for row, value in zip(cell_ids, scores):
         for cell_id in row:
             cell = int(cell_id)
             if cell not in calibration_sets:
@@ -286,11 +269,6 @@ def compute_corrections(
     min_calib: int,
 ) -> Corrections:
     """Conformalise every sufficiently populated cell and add a fallback."""
-    if not 0.0 < alpha < 1.0:
-        raise ValueError("alpha must lie strictly between zero and one.")
-    if min_calib < 1:
-        raise ValueError("min_calib must be positive.")
-
     corrections: Corrections = {}
     fallback = 0.0
     for state_action, calibration_set in calib_sets.items():
@@ -324,14 +302,8 @@ def correction_for(
         dtype=float,
     )
 
-    if agg == "max":
-        correction = float(np.max(values))
-    elif agg == "mean":
-        correction = float(np.mean(values))
-    elif agg == "median":
-        correction = float(np.median(values))
-    else:
-        raise ValueError("Unknown aggregation; use 'max', 'mean', or 'median'.")
+    aggregate = {"max": np.max, "mean": np.mean, "median": np.median}[agg]
+    correction = float(aggregate(values))
 
     if clip_correction:
         correction = max(0.0, correction)
