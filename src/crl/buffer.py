@@ -1,8 +1,10 @@
-import numpy as np
 from collections import namedtuple
+from collections.abc import Iterator
+
+import numpy as np
 
 # -----------------------------------------------------------------------------
-# 1. Replay buffer: simple ring buffer (fixed capacity, FIFO eviction)
+# Replay buffer: simple ring buffer (fixed capacity, FIFO)
 # -----------------------------------------------------------------------------
 Transition = namedtuple(
     "Transition", ["state", "action", "reward", "next_state", "next_action", "done"]
@@ -24,9 +26,18 @@ class ReplayBuffer:
     def __len__(self):
         return self.capacity if self.full else self.pos
 
-    def __getitem__(self, key: int) -> Transition:
-        return self.buffer[key]
+    def __iter__(self) -> Iterator[Transition]:
+        if self.full:
+            ordered = self.buffer[self.pos :] + self.buffer[: self.pos]
+        else:
+            ordered = self.buffer[: self.pos]
+        return iter(ordered)
+
+    def __getitem__(self, key: int | slice) -> Transition | list[Transition]:
+        ordered = list(self)
+        return ordered[key]
 
     def sample(self, batch_size: int) -> list[Transition]:
         idx = np.random.choice(len(self), batch_size, replace=False)
-        return [self.buffer[i] for i in idx]
+        transitions = list(self)
+        return [transitions[i] for i in idx]

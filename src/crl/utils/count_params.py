@@ -1,63 +1,28 @@
-# %%
-"Quick utility for counting model params for report"
+from __future__ import annotations
 
-from typing import Dict, Tuple
-
-from crl.agents import learn_dqn_policy
+import torch
+from stable_baselines3 import DQN
 
 
-def count_params(module) -> int:
-    return sum(p.numel() for p in module.parameters() if p.requires_grad)
-
-
-def count_dqn_inference_params(model) -> Tuple[int, Dict[str, int]]:
-    """
-    Parameters used for selecting an action with a DQN policy:
-    features_extractor + q_net.
-    """
-    pi = model.policy
-    if not hasattr(pi, "q_net"):
-        raise TypeError("This helper expects an SB3 DQN model (policy with `q_net`).")
-    parts: Dict[str, int] = {}
-    # if hasattr(pi, "features_extractor"):
-    #     parts["features_extractor"] = count_params(pi.features_extractor)
-    parts["q_net"] = count_params(pi.q_net)
-    return sum(parts.values()), parts
-
-
-def count_dqn_training_step_params(model) -> Tuple[int, Dict[str, int]]:
-    """
-    Parameters touched in a typical DQN training step:
-    features_extractor + q_net + q_net_target.
-    """
-    pi = model.policy
-    if not hasattr(pi, "q_net"):
-        raise TypeError("This helper expects an SB3 DQN model (policy with `q_net`).")
-    parts: Dict[str, int] = {}
-    # if hasattr(pi, "features_extractor"):
-    #     parts["features_extractor"] = count_params(pi.features_extractor)
-    parts["q_net"] = count_params(pi.q_net)
-    if hasattr(pi, "q_net_target"):
-        parts["q_net_target"] = count_params(pi.q_net_target)
-    return sum(parts.values()), parts
-
-
-def main():
-    env = "LunarLander-v3"
-    model, vec_env = learn_dqn_policy(env)
-    n_infer, breakdown_infer = count_dqn_inference_params(model)
-    n_train, breakdown_train = count_dqn_training_step_params(model)
-    n_policy_total = sum(
-        p.numel() for p in model.policy.parameters() if p.requires_grad
+def count_params(module: torch.nn.Module) -> int:
+    """Count trainable parameters in a PyTorch module."""
+    return sum(
+        parameter.numel()
+        for parameter in module.parameters()
+        if parameter.requires_grad
     )
 
-    print("DQN inference params:", n_infer, breakdown_infer)
-    print("DQN training-step params:", n_train, breakdown_train)
-    print("Total trainable params in policy object:", n_policy_total)
+
+def count_dqn_inference_params(model: DQN) -> tuple[int, dict[str, int]]:
+    """Count parameters used by a DQN Q-network during action selection."""
+    parts = {"q_net": count_params(model.policy.q_net)}
+    return sum(parts.values()), parts
 
 
-if __name__ == "__main__":
-    main()
-
-
-# %%
+def count_dqn_training_step_params(model: DQN) -> tuple[int, dict[str, int]]:
+    """Count online and target Q-network parameters used during training."""
+    parts = {
+        "q_net": count_params(model.policy.q_net),
+        "q_net_target": count_params(model.policy.q_net_target),
+    }
+    return sum(parts.values()), parts

@@ -1,36 +1,90 @@
-# Conformal Prediction for RL - MSc Thesis
+# Conformal calibration for reinforcement learning
 
-## Installation
-I strongly recommend the use of `uv` to manage dependencies - download [here](https://docs.astral.sh/uv/):
+Research code for sparse-grid conformal calibration of value-based reinforcement
+learning policies. The current paper-facing implementation uses a nominal-policy
+rollout to fit a state-action grid and estimate conformal corrections, then
+evaluates the corrected greedy policy under controlled dynamics shifts.
+
+The maintained experiment covers Gymnasium classic-control environments and
+MinAtar Breakout with DQN, Double DQN, and CQL-DQN. Actor–critic support and
+reporting relative to per-shift reference policies remain planned extensions.
+
+## Setup
+
+The project requires Python 3.12 or newer and uses [`uv`](https://docs.astral.sh/uv/) for dependency management. To setup the virtual env, run
+
 ```bash
->>> uv sync
->>> uv pip install -e .
+uv sync
 ```
 
-Otherwise, the following default pip install should work (not yet tested):
+Trained policies are cached under `models/` by default. Set `MODELS_DIR` in a local `.env` file to use another location.
+
+
+## Run Experiments
+
+### Basic Evaluation
+
+To run a single seeded CartPole robustness experiment:
+
 ```bash
->>> python -m venv .venv
->>> source .venv/bin/activate
->>> pip install .
-``` 
+uv run scripts/cli.py \
+  --env-name CartPole-v1 \
+  --results-out CartPole-v1/RUN_NAME
+```
 
-## Repo Structure
+If there are no cached models saved, this will train a new DQN for each of 25 seeds and then evaluate it. If there are saved models, then the script will load them first. To see a list of args to the CLI script, run
 
-Currently, all the experiments live in notebooks in the `notebooks/experiments` dir. These are being moved into proper `.py` files as the structure begins to coalesce. The primary notebook is `traintime_robustness.py`, which implements and tests conformal calibration. A single-file reference implementation is on the roadmap.
 
+```bash
+uv run scripts/cli.py --help
+```
+
+
+### MinAtar
+To compare 500k- and 5M-step MinAtar policies over three seeds:
+
+```bash
+uv run python scripts/minatar_training_benchmark.py
+```
+
+Run a single MinAtar robustness seed with a four-dimensional, four-bin latent
+grid and 50k calibration transitions:
+
+```bash
+uv run python scripts/cli.py \
+  --env-name MinAtar/Breakout-v1 \
+  --n-train-steps 500000 \
+  --debug-seed 0
+```
+
+
+### Per-shift reference policies
+
+The reference-policy runner trains fresh policies directly for each parameter shifts. It runs a few seeds and saves raw episode returns, so you can compute the calibrated returns as a ratio to an agent trained directly in that environment.
+
+```bash
+uv run python scripts/optimal_policies.py \
+  CartPole-v1 \
+  --seeds 0 1 2 3 4
+```
+
+
+## Repository layout
+
+- `src/crl/calib.py`: transition collection, batched conformity scores, and
+  sparse conformal corrections.
+- `src/crl/discretise/grid.py`: sparse mixed-radix state-action grid.
+- `src/crl/experiment.py`: calibration and paired shift evaluation pipeline.
+- `src/crl/agents/`: DQN, DDQN, and CQL-DQN training/loading.
+- `src/crl/configs/`: environment-specific DQN hyperparameters from SB Zoo.
+- `scripts/`: runnable experiment entry points.
+- `tests/crl/`: tests.
+
+Generated models, experiment results, profiles, and local environment files are
+excluded from version control.
 
 ## Tests
+
 ```bash
->>> uv run pytest
+uv run pytest -q
 ```
-
-## Models Directory
-- Configure a single models cache root via `.env` with `MODELS_DIR`.
-- `MODELS_DIR` may be relative; it is resolved against the project root (the folder containing `pyproject.toml` or `.git`).
-- Defaults to `models/` at the project root if unset.
-
-Example `.env`:
-```
-MODELS_DIR=models
-```
-This resolves to `<repo>/models`, regardless of where you run scripts or notebooks.

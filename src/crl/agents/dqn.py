@@ -1,26 +1,32 @@
-# %%
-import os
+from __future__ import annotations
+
 from pathlib import Path
 
-import gymnasium as gym
-import yaml
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
+from crl.agents._common import (
+    cached_model_path,
+    load_cached_agent,
+    load_dqn_args,
+    make_training_env,
+    model_basename,
+    seeded_vec_env,
+)
+from crl.env import MINATAR_BREAKOUT
 from crl.types import ClassicControl
-from crl.utils.paths import get_models_dir
 
 
-def instantiate_vanilla_dqn(env_name: ClassicControl, seed: int = 0) -> DQN:
-    env = gym.make(env_name, render_mode="rgb_array")
-
-    # using SB3 zoo suggested hyperparameters (path relative to this file)
-    config_path = Path(__file__).resolve().parent / ".." / "configs" / f"{env_name}.yml"
-    with open(config_path, "r") as f:
-        dqn_args = yaml.safe_load(f)
-
-    model = DQN(env=env, seed=seed, **dqn_args)
-    return model
+def instantiate_vanilla_dqn(
+    env_name: ClassicControl,
+    seed: int = 0,
+    total_timesteps: int | None = None,
+) -> DQN:
+    return DQN(
+        env=make_training_env(env_name),
+        seed=seed,
+        **load_dqn_args(env_name, total_timesteps),
+    )
 
 
 def learn_dqn_policy(
@@ -30,38 +36,22 @@ def learn_dqn_policy(
     model_dir: str | Path | None = None,
     train_from_scratch: bool = False,
 ) -> tuple[DQN, VecEnv]:
-    # Path for caching the trained model
-    base_dir = Path(model_dir) if model_dir is not None else get_models_dir()
-    algo_dir = base_dir / env_name / "dqn"
-    os.makedirs(algo_dir, exist_ok=True)
-    model_path = algo_dir / f"model_{seed}"
-
-    # Load cached model if available and not training from scratch
-    if not train_from_scratch and os.path.exists(str(model_path) + ".zip"):
-        print(f"Loading model: {seed}")
-        model = DQN.load(str(model_path))
-        # Attach a fresh environment so the model is usable immediately
-        env = gym.make(env_name, render_mode="rgb_array")
-        model.set_env(env)
+    """Load a cached DQN or train and cache one without rendering overhead."""
+    model_path = cached_model_path(
+        env_name,
+        "dqn",
+        model_basename(env_name, seed, total_timesteps),
+        model_dir,
+    )
+    if not train_from_scratch and model_path.with_suffix(".zip").exists():
+        print(f"Loading DQN model: {seed}")
+        model = load_cached_agent(DQN, model_path, env_name)
     else:
-        # Train a new model from scratch
-        print(f"Learning from scratch: {seed}")
-        model = instantiate_vanilla_dqn(env_name, seed)
-        model.learn(total_timesteps=total_timesteps, progress_bar=True)
+        print(f"Learning DQN from scratch: {seed}")
+        model = instantiate_vanilla_dqn(env_name, seed, total_timesteps)
+        model.learn(
+            total_timesteps=total_timesteps,
+            progress_bar=env_name == MINATAR_BREAKOUT,
+        )
         model.save(str(model_path))
-
-    # Retrieve the vectorised environment
-    vec_env = model.get_env() if model.get_env() is not None else model.env
-    return model, vec_env
-
-
-# %%
-def main():
-    from stable_baselines3.common.evaluation import evaluate_policy
-
-    model, vec_env = learn_dqn_policy(env_name="Acrobot-v1", seed=1)
-    print(evaluate_policy(model, vec_env))
-
-
-if __name__ == "__main__":
-    main()
+    return model, seeded_vec_env(model, seed)
